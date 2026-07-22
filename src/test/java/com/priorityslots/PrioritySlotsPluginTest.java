@@ -1,13 +1,13 @@
-package com.example;
+package com.priorityslots;
 
 import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public class ExamplePluginTest
+public class PrioritySlotsPluginTest
 {
 	public static void main(String[] args) throws Exception
 	{
-		ExternalPluginManager.loadBuiltin(ExamplePlugin.class);
+		ExternalPluginManager.loadBuiltin(PrioritySlotsPlugin.class);
 		RuneLite.main(args);
 	}
 }
