@@ -15,12 +15,14 @@ public class SlotResolution
 
 	String cellId;
 	String definitionId;
+	int index;
 	State state;
 	int exactItemId;
 
 	private SlotResolution(
 			String cellId,
 			String definitionId,
+			int index,
 			State state,
 			int exactItemId)
 	{
@@ -29,7 +31,19 @@ public class SlotResolution
 				definitionId,
 				"definitionId"
 		);
-		this.state = Objects.requireNonNull(state, "state");
+
+		if (index < 0)
+		{
+			throw new IllegalArgumentException(
+					"index must not be negative"
+			);
+		}
+
+		this.index = index;
+		this.state = Objects.requireNonNull(
+				state,
+				"state"
+		);
 
 		if (state == State.UNRESOLVED)
 		{
@@ -43,7 +57,8 @@ public class SlotResolution
 		else if (exactItemId <= 0)
 		{
 			throw new IllegalArgumentException(
-					"OWNED and GHOST require a positive item ID"
+					"OWNED and GHOST require "
+							+ "a positive item ID"
 			);
 		}
 
@@ -53,11 +68,13 @@ public class SlotResolution
 	public static SlotResolution owned(
 			String cellId,
 			String definitionId,
+			int index,
 			int exactItemId)
 	{
 		return new SlotResolution(
 				cellId,
 				definitionId,
+				index,
 				State.OWNED,
 				exactItemId
 		);
@@ -66,11 +83,13 @@ public class SlotResolution
 	public static SlotResolution ghost(
 			String cellId,
 			String definitionId,
+			int index,
 			int exactItemId)
 	{
 		return new SlotResolution(
 				cellId,
 				definitionId,
+				index,
 				State.GHOST,
 				exactItemId
 		);
@@ -78,11 +97,13 @@ public class SlotResolution
 
 	public static SlotResolution unresolved(
 			String cellId,
-			String definitionId)
+			String definitionId,
+			int index)
 	{
 		return new SlotResolution(
 				cellId,
 				definitionId,
+				index,
 				State.UNRESOLVED,
 				-1
 		);

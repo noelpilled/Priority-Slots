@@ -1,12 +1,10 @@
 package com.priorityslots;
 
-import com.google.inject.Provides;
 import com.priorityslots.bank.BankSnapshotFactory;
 import com.priorityslots.domain.BankSnapshot;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -59,15 +57,6 @@ public class PrioritySlotsPlugin extends Plugin
 		log.debug(
 				"Captured bank snapshot with {} exact item IDs",
 				bankSnapshot.distinctItemCount()
-		);
-	}
-
-	@Provides
-	PrioritySlotsConfig provideConfig(
-			ConfigManager configManager)
-	{
-		return configManager.getConfig(
-				PrioritySlotsConfig.class
 		);
 	}
 }

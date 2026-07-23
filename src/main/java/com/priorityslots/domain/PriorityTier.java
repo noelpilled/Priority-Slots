@@ -8,7 +8,8 @@ import lombok.Value;
 import lombok.With;
 
 @Value
-public class PriorityTier {
+public class PriorityTier
+{
 	String id;
 
 	@With
@@ -46,14 +47,16 @@ public class PriorityTier {
 		this.exactItemIds = List.copyOf(exactItemIds);
 	}
 
-	public static PriorityTier create(List<Integer> exactItemIds) {
+	public static PriorityTier create(List<Integer> exactItemIds)
+	{
 		return new PriorityTier(
 				UUID.randomUUID().toString(),
 				exactItemIds
 		);
 	}
 
-	private static String requireNonBlank(String value, String fieldName) {
+	private static String requireNonBlank(String value, String fieldName)
+	{
 		Objects.requireNonNull(value, fieldName);
 
 		String trimmed = value.trim();

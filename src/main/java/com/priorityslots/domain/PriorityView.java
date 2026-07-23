@@ -1,7 +1,9 @@
 package com.priorityslots.domain;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import lombok.Value;
 import lombok.With;
@@ -27,12 +29,31 @@ public class PriorityView
 
 		Objects.requireNonNull(placements, "placements");
 
+		Set<String> cellIds = new HashSet<>();
+		Set<Integer> indices = new HashSet<>();
+
 		for (CellPlacement placement : placements)
 		{
 			Objects.requireNonNull(
 					placement,
 					"placements must not contain null"
 			);
+
+			if (!cellIds.add(placement.getCellId()))
+			{
+				throw new IllegalArgumentException(
+						"Duplicate cell ID: "
+								+ placement.getCellId()
+				);
+			}
+
+			if (!indices.add(placement.getIndex()))
+			{
+				throw new IllegalArgumentException(
+						"Duplicate placement index: "
+								+ placement.getIndex()
+				);
+			}
 		}
 
 		this.placements = List.copyOf(placements);

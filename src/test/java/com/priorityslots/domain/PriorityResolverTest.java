@@ -120,7 +120,7 @@ public class PriorityResolverTest
 	}
 
 	@Test
-	public void treatsZeroQuantityAsNotOwned()
+	public void treatsMissingHigherPriorityItemAsNotOwned()
 	{
 		PriorityDefinition definition =
 				createDefinition();
@@ -131,8 +131,8 @@ public class PriorityResolverTest
 		BankSnapshot bankSnapshot =
 				new BankSnapshot(
 						Map.of(
-								HIGH_PRIORITY_ITEM, 0,
-								LOW_PRIORITY_ITEM, 2
+								LOW_PRIORITY_ITEM,
+								2
 						)
 				);
 
@@ -244,10 +244,14 @@ public class PriorityResolverTest
 				placement.getDefinitionId(),
 				resolution.getDefinitionId()
 		);
+		assertEquals(
+				placement.getIndex(),
+				resolution.getIndex()
+		);
 	}
 
 	@Test
-	public void resolveViewPreservesPlacementOrder()
+	public void resolveViewOrdersResultsByPlacementIndex()
 	{
 		PriorityDefinition definition =
 				createDefinition();
@@ -294,20 +298,28 @@ public class PriorityResolverTest
 		assertEquals(2, resolutions.size());
 
 		assertEquals(
-				"owned-cell",
+				"missing-cell",
 				resolutions.get(0).getCellId()
 		);
 		assertEquals(
-				SlotResolution.State.OWNED,
+				1,
+				resolutions.get(0).getIndex()
+		);
+		assertEquals(
+				SlotResolution.State.UNRESOLVED,
 				resolutions.get(0).getState()
 		);
 
 		assertEquals(
-				"missing-cell",
+				"owned-cell",
 				resolutions.get(1).getCellId()
 		);
 		assertEquals(
-				SlotResolution.State.UNRESOLVED,
+				4,
+				resolutions.get(1).getIndex()
+		);
+		assertEquals(
+				SlotResolution.State.OWNED,
 				resolutions.get(1).getState()
 		);
 	}

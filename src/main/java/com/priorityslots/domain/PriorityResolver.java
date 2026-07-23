@@ -1,6 +1,7 @@
 package com.priorityslots.domain;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,7 +32,8 @@ public final class PriorityResolver
 		{
 			return SlotResolution.unresolved(
 					placement.getCellId(),
-					placement.getDefinitionId()
+					placement.getDefinitionId(),
+					placement.getIndex()
 			);
 		}
 
@@ -52,6 +54,7 @@ public final class PriorityResolver
 					return SlotResolution.owned(
 							placement.getCellId(),
 							placement.getDefinitionId(),
+							placement.getIndex(),
 							exactItemId
 					);
 				}
@@ -63,15 +66,18 @@ public final class PriorityResolver
 			return SlotResolution.ghost(
 					placement.getCellId(),
 					placement.getDefinitionId(),
+					placement.getIndex(),
 					ghostItemId
 			);
 		}
 
 		return SlotResolution.unresolved(
 				placement.getCellId(),
-				placement.getDefinitionId()
+				placement.getDefinitionId(),
+				placement.getIndex()
 		);
 	}
+
 	public List<SlotResolution> resolveView(
 			PriorityView view,
 			Map<String, PriorityDefinition> definitionsById,
@@ -101,6 +107,12 @@ public final class PriorityResolver
 					)
 			);
 		}
+
+		resolutions.sort(
+				Comparator.comparingInt(
+						SlotResolution::getIndex
+				)
+		);
 
 		return List.copyOf(resolutions);
 	}

@@ -276,6 +276,7 @@ public class DomainModelTest
 				SlotResolution.owned(
 						"cell-1",
 						"definition-1",
+						3,
 						ITEM_HIGH_PRIORITY
 				);
 
@@ -287,6 +288,7 @@ public class DomainModelTest
 				"definition-1",
 				resolution.getDefinitionId()
 		);
+		assertEquals(3, resolution.getIndex());
 		assertEquals(
 				SlotResolution.State.OWNED,
 				resolution.getState()
@@ -304,13 +306,15 @@ public class DomainModelTest
 		SlotResolution resolution =
 				SlotResolution.unresolved(
 						"cell-1",
-						"definition-1"
+						"definition-1",
+						3
 				);
 
 		assertEquals(
 				SlotResolution.State.UNRESOLVED,
 				resolution.getState()
 		);
+		assertEquals(3, resolution.getIndex());
 		assertEquals(
 				-1,
 				resolution.getExactItemId()

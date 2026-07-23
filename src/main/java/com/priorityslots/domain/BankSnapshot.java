@@ -1,6 +1,5 @@
 package com.priorityslots.domain;
 
-import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import lombok.Value;
@@ -10,7 +9,8 @@ public class BankSnapshot
 {
 	Map<Integer, Integer> quantitiesByExactItemId;
 
-	public BankSnapshot(Map<Integer, Integer> quantitiesByExactItemId)
+	public BankSnapshot(
+			Map<Integer, Integer> quantitiesByExactItemId)
 	{
 		Objects.requireNonNull(
 				quantitiesByExactItemId,
@@ -30,10 +30,10 @@ public class BankSnapshot
 				);
 			}
 
-			if (quantity == null || quantity < 0)
+			if (quantity == null || quantity <= 0)
 			{
 				throw new IllegalArgumentException(
-						"Bank quantities must not be negative"
+						"Bank quantities must be positive"
 				);
 			}
 		}
@@ -44,12 +44,14 @@ public class BankSnapshot
 
 	public static BankSnapshot empty()
 	{
-		return new BankSnapshot(Collections.emptyMap());
+		return new BankSnapshot(Map.of());
 	}
 
 	public boolean contains(int exactItemId)
 	{
-		return quantityOf(exactItemId) > 0;
+		return quantitiesByExactItemId.containsKey(
+				exactItemId
+		);
 	}
 
 	public int quantityOf(int exactItemId)
