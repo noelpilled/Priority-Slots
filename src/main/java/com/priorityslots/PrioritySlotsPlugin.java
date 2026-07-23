@@ -1,5 +1,6 @@
 package com.priorityslots;
 
+import com.priorityslots.banktags.BankTagProjector;
 import com.priorityslots.bank.BankSnapshotFactory;
 import com.priorityslots.domain.BankSnapshot;
 import com.priorityslots.domain.PriorityState;
@@ -12,6 +13,8 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ProfileChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.PluginDependency;
+import net.runelite.client.plugins.banktags.BankTagsPlugin;
 
 @Slf4j
 @PluginDescriptor(
@@ -24,6 +27,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 				"priority"
 		}
 )
+@PluginDependency(BankTagsPlugin.class)
 public class PrioritySlotsPlugin extends Plugin
 {
 	private final BankSnapshotFactory bankSnapshotFactory =
@@ -38,6 +42,8 @@ public class PrioritySlotsPlugin extends Plugin
 	private BankSnapshot bankSnapshot =
 			BankSnapshot.empty();
 
+	private BankTagProjector bankTagProjector;
+
 	@Override
 	protected void startUp()
 	{
@@ -49,6 +55,7 @@ public class PrioritySlotsPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		bankTagProjector.unregisterAll();
 		priorityState = PriorityState.empty();
 		bankSnapshot = BankSnapshot.empty();
 
@@ -75,6 +82,11 @@ public class PrioritySlotsPlugin extends Plugin
 				event.getItemContainer()
 		);
 
+		priorityState = bankTagProjector.synchronize(
+				priorityState,
+				bankSnapshot
+		);
+
 		log.debug(
 				"Captured bank snapshot with {} exact item IDs",
 				bankSnapshot.distinctItemCount()
@@ -92,6 +104,11 @@ public class PrioritySlotsPlugin extends Plugin
 				priorityState.getDefinitions().size(),
 				priorityState.getGroups().size(),
 				priorityState.getBindings().size()
+		);
+
+		priorityState = bankTagProjector.synchronize(
+				priorityState,
+				bankSnapshot
 		);
 	}
 }
