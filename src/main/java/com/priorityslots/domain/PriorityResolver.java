@@ -78,12 +78,26 @@ public final class PriorityResolver
 		);
 	}
 
-	public List<SlotResolution> resolveView(
-			PriorityView view,
+	public List<SlotResolution> resolveBinding(
+			BankTagBinding binding,
 			Map<String, PriorityDefinition> definitionsById,
 			BankSnapshot bankSnapshot)
 	{
-		Objects.requireNonNull(view, "view");
+		Objects.requireNonNull(binding, "binding");
+
+		return resolvePlacements(
+				binding.placements(),
+				definitionsById,
+				bankSnapshot
+		);
+	}
+
+	public List<SlotResolution> resolvePlacements(
+			List<CellPlacement> placements,
+			Map<String, PriorityDefinition> definitionsById,
+			BankSnapshot bankSnapshot)
+	{
+		Objects.requireNonNull(placements, "placements");
 		Objects.requireNonNull(
 				definitionsById,
 				"definitionsById"
@@ -96,12 +110,14 @@ public final class PriorityResolver
 		List<SlotResolution> resolutions =
 				new ArrayList<>();
 
-		for (CellPlacement placement
-				: view.getPlacements())
+		for (CellPlacement placement : placements)
 		{
 			resolutions.add(
 					resolve(
-							placement,
+							Objects.requireNonNull(
+									placement,
+									"placements must not contain null"
+							),
 							definitionsById,
 							bankSnapshot
 					)

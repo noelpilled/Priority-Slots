@@ -1,12 +1,13 @@
 package com.priorityslots.persistence;
 
 import com.google.gson.Gson;
+import com.priorityslots.domain.BankTagBinding;
+import com.priorityslots.domain.BankTagSlotBinding;
 import com.priorityslots.domain.CellPlacement;
 import com.priorityslots.domain.PriorityDefinition;
 import com.priorityslots.domain.PriorityGroup;
 import com.priorityslots.domain.PriorityState;
 import com.priorityslots.domain.PriorityTier;
-import com.priorityslots.domain.PriorityView;
 import java.util.List;
 import org.junit.Test;
 
@@ -65,18 +66,25 @@ public class PriorityStateCodecTest
 						4
 				);
 
-		PriorityView view =
-				new PriorityView(
-						"view-1",
+		BankTagSlotBinding slot =
+				new BankTagSlotBinding(
+						placement,
+						HIGH_PRIORITY_ITEM,
+						MIDDLE_PRIORITY_ITEM
+				);
+
+		BankTagBinding binding =
+				new BankTagBinding(
+						"binding-1",
 						"Teleport layout",
-						List.of(placement)
+						List.of(slot)
 				);
 
 		PriorityState original =
 				new PriorityState(
 						List.of(definition),
 						List.of(group),
-						List.of(view)
+						List.of(binding)
 				);
 
 		String json = codec.encode(original);
@@ -86,6 +94,22 @@ public class PriorityStateCodecTest
 		assertTrue(
 				json.contains(
 						"\"schemaVersion\":1"
+				)
+		);
+
+		assertTrue(
+				json.contains("\"bindings\"")
+		);
+		assertTrue(
+				json.contains(
+						"\"fallbackExactItemId\":"
+								+ HIGH_PRIORITY_ITEM
+				)
+		);
+		assertTrue(
+				json.contains(
+						"\"lastProjectedExactItemId\":"
+								+ MIDDLE_PRIORITY_ITEM
 				)
 		);
 
@@ -114,8 +138,8 @@ public class PriorityStateCodecTest
 						"{"
 								+ "\"schemaVersion\":2,"
 								+ "\"definitions\":[],"
-								+ "\"groups\":[]"
-								+ "\"views\":[]"
+								+ "\"groups\":[],"
+								+ "\"bindings\":[]"
 								+ "}"
 				)
 		);
@@ -140,14 +164,51 @@ public class PriorityStateCodecTest
 	}
 
 	@Test
+	public void rejectsInvalidBindingState()
+	{
+		String json =
+				"{"
+						+ "\"schemaVersion\":1,"
+						+ "\"definitions\":[],"
+						+ "\"groups\":[],"
+						+ "\"bindings\":["
+						+ "{"
+						+ "\"id\":\"binding-1\","
+						+ "\"bankTagName\":\"Invalid binding\","
+						+ "\"slots\":["
+						+ "{"
+						+ "\"cellId\":\"cell-1\","
+						+ "\"definitionId\":\"definition-1\","
+						+ "\"index\":4,"
+						+ "\"fallbackExactItemId\":1005,"
+						+ "\"lastProjectedExactItemId\":1005"
+						+ "},"
+						+ "{"
+						+ "\"cellId\":\"cell-2\","
+						+ "\"definitionId\":\"definition-2\","
+						+ "\"index\":4,"
+						+ "\"fallbackExactItemId\":1003,"
+						+ "\"lastProjectedExactItemId\":1003"
+						+ "}"
+						+ "]"
+						+ "}"
+						+ "]"
+						+ "}";
+
+		assertFormatException(() ->
+				codec.decode(json)
+		);
+	}
+
+	@Test
 	public void rejectsInvalidDomainState()
 	{
 		String json =
 				"{"
 						+ "\"schemaVersion\":1,"
 						+ "\"definitions\":[],"
-						+ "\"groups\":[]"
-						+ "\"views\":["
+						+ "\"groups\":[],"
+						+ "\"bindings\":["
 						+ "{"
 						+ "\"id\":\"view-1\","
 						+ "\"name\":\"Invalid view\","
@@ -189,7 +250,7 @@ public class PriorityStateCodecTest
 						+ "]"
 						+ "}"
 						+ "],"
-						+ "\"views\":[]"
+						+ "\"bindings\":[]"
 						+ "}";
 
 		assertFormatException(() ->

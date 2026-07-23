@@ -20,12 +20,12 @@ public class PriorityState
 	List<PriorityGroup> groups;
 
 	@With
-	List<PriorityView> views;
+	List<BankTagBinding> bindings;
 
 	public PriorityState(
 			List<PriorityDefinition> definitions,
 			List<PriorityGroup> groups,
-			List<PriorityView> views)
+			List<BankTagBinding> bindings)
 	{
 		Objects.requireNonNull(
 				definitions,
@@ -36,17 +36,17 @@ public class PriorityState
 				"groups"
 		);
 		Objects.requireNonNull(
-				views,
-				"views"
+				bindings,
+				"bindings"
 		);
 
 		validateDefinitions(definitions);
 		validateGroups(groups);
-		validateViews(views);
+		validateBindings(bindings);
 
 		this.definitions = List.copyOf(definitions);
 		this.groups = List.copyOf(groups);
-		this.views = List.copyOf(views);
+		this.bindings = List.copyOf(bindings);
 	}
 
 	public static PriorityState empty()
@@ -84,6 +84,19 @@ public class PriorityState
 		for (PriorityGroup group : groups)
 		{
 			result.put(group.getId(), group);
+		}
+
+		return Collections.unmodifiableMap(result);
+	}
+
+	public Map<String, BankTagBinding> bindingsById()
+	{
+		Map<String, BankTagBinding> result =
+				new LinkedHashMap<>();
+
+		for (BankTagBinding binding : bindings)
+		{
+			result.put(binding.getId(), binding);
 		}
 
 		return Collections.unmodifiableMap(result);
@@ -134,23 +147,23 @@ public class PriorityState
 		}
 	}
 
-	private static void validateViews(
-			List<PriorityView> views)
+	private static void validateBindings(
+			List<BankTagBinding> bindings)
 	{
-		Set<String> viewIds = new HashSet<>();
+		Set<String> bindingIds = new HashSet<>();
 
-		for (PriorityView view : views)
+		for (BankTagBinding binding : bindings)
 		{
 			Objects.requireNonNull(
-					view,
-					"views must not contain null"
+					binding,
+					"bindings must not contain null"
 			);
 
-			if (!viewIds.add(view.getId()))
+			if (!bindingIds.add(binding.getId()))
 			{
 				throw new IllegalArgumentException(
-						"Duplicate view ID: "
-								+ view.getId()
+						"Duplicate binding ID: "
+								+ binding.getId()
 				);
 			}
 		}

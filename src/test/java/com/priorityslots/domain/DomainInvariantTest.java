@@ -81,64 +81,6 @@ public class DomainInvariantTest
 		);
 	}
 
-	@Test
-	public void viewRejectsDuplicateCellIds()
-	{
-		CellPlacement firstPlacement =
-				new CellPlacement(
-						"cell-1",
-						"definition-1",
-						1
-				);
-
-		CellPlacement secondPlacement =
-				new CellPlacement(
-						"cell-1",
-						"definition-2",
-						2
-				);
-
-		assertIllegalArgument(() ->
-				new PriorityView(
-						"view-1",
-						"Duplicate cells",
-						List.of(
-								firstPlacement,
-								secondPlacement
-						)
-				)
-		);
-	}
-
-	@Test
-	public void viewRejectsDuplicateIndices()
-	{
-		CellPlacement firstPlacement =
-				new CellPlacement(
-						"cell-1",
-						"definition-1",
-						1
-				);
-
-		CellPlacement secondPlacement =
-				new CellPlacement(
-						"cell-2",
-						"definition-2",
-						1
-				);
-
-		assertIllegalArgument(() ->
-				new PriorityView(
-						"view-1",
-						"Duplicate indices",
-						List.of(
-								firstPlacement,
-								secondPlacement
-						)
-				)
-		);
-	}
-
 	private static void assertIllegalArgument(
 			Runnable action)
 	{

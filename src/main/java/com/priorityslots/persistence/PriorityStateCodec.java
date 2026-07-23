@@ -3,12 +3,13 @@ package com.priorityslots.persistence;
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.SerializedName;
+import com.priorityslots.domain.BankTagBinding;
+import com.priorityslots.domain.BankTagSlotBinding;
 import com.priorityslots.domain.CellPlacement;
 import com.priorityslots.domain.PriorityDefinition;
 import com.priorityslots.domain.PriorityGroup;
 import com.priorityslots.domain.PriorityState;
 import com.priorityslots.domain.PriorityTier;
-import com.priorityslots.domain.PriorityView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -131,8 +132,8 @@ public final class PriorityStateCodec
 		@SerializedName("groups")
 		private List<GroupDocument> groups;
 
-		@SerializedName("views")
-		private List<ViewDocument> views;
+		@SerializedName("bindings")
+		private List<ViewDocument> bindings;
 
 		private static StateDocument fromDomain(
 				PriorityState state)
@@ -165,13 +166,13 @@ public final class PriorityStateCodec
 				);
 			}
 
-			document.views = new ArrayList<>();
+			document.bindings = new ArrayList<>();
 
-			for (PriorityView view
-					: state.getViews())
+			for (BankTagBinding binding
+					: state.getBindings())
 			{
-				document.views.add(
-						ViewDocument.fromDomain(view)
+				document.bindings.add(
+						BindingDocument.fromDomain(binding)
 				);
 			}
 
@@ -223,16 +224,16 @@ public final class PriorityStateCodec
 				);
 			}
 
-			List<PriorityView> decodedViews =
+			List<BankTagBinding> decodedBindings =
 					new ArrayList<>();
 
-			for (ViewDocument view
-					: requireList(views, "views"))
+			for (BindingDocument binding
+					: requireList(bindings, "bindings"))
 			{
-				decodedViews.add(
+				decodedBindings.add(
 						requireEntry(
-								view,
-								"views must not contain null"
+								binding,
+								"bindings must not contain null"
 						).toDomain()
 				);
 			}
@@ -240,7 +241,7 @@ public final class PriorityStateCodec
 			return new PriorityState(
 					decodedDefinitions,
 					decodedGroups,
-					decodedViews
+					decodedBindings
 			);
 		}
 	}
@@ -380,71 +381,66 @@ public final class PriorityStateCodec
 		}
 	}
 
-	private static final class ViewDocument
+	private static final class BindingDocument
 	{
 		@SerializedName("id")
 		private String id;
 
-		@SerializedName("name")
-		private String name;
+		@SerializedName("bankTagName")
+		private String bankTagName;
 
-		@SerializedName("placements")
-		private List<PlacementDocument> placements;
+		@SerializedName("slots")
+		private List<SlotDocument> slots;
 
-		private static ViewDocument fromDomain(
-				PriorityView view)
+		private static BindingDocument fromDomain(
+				BankTagBinding binding)
 		{
-			ViewDocument document =
-					new ViewDocument();
+			BindingDocument document =
+					new BindingDocument();
 
-			document.id = view.getId();
-			document.name = view.getName();
-			document.placements =
-					new ArrayList<>();
+			document.id = binding.getId();
+			document.bankTagName =
+					binding.getBankTagName();
 
-			for (CellPlacement placement
-					: view.getPlacements())
+			document.slots = new ArrayList<>();
+
+			for (BankTagSlotBinding slot
+					: binding.getSlots())
 			{
-				document.placements.add(
-						PlacementDocument.fromDomain(
-								placement
-						)
+				document.slots.add(
+						SlotDocument.fromDomain(slot)
 				);
 			}
 
 			return document;
 		}
 
-		private PriorityView toDomain()
+		private BankTagBinding toDomain()
 		{
-			List<CellPlacement>
-					decodedPlacements =
+			List<BankTagSlotBinding> decodedSlots =
 					new ArrayList<>();
 
-			for (PlacementDocument placement
-					: requireList(
-					placements,
-					"view placements"
-			))
+			for (SlotDocument slot
+					: requireList(slots, "binding slots"))
 			{
-				decodedPlacements.add(
+				decodedSlots.add(
 						requireEntry(
-								placement,
-								"view placements must not "
+								slot,
+								"binding slots must not "
 										+ "contain null"
 						).toDomain()
 				);
 			}
 
-			return new PriorityView(
+			return new BankTagBinding(
 					id,
-					name,
-					decodedPlacements
+					bankTagName,
+					decodedSlots
 			);
 		}
 	}
 
-	private static final class PlacementDocument
+	private static final class SlotDocument
 	{
 		@SerializedName("cellId")
 		private String cellId;
@@ -455,11 +451,20 @@ public final class PriorityStateCodec
 		@SerializedName("index")
 		private int index;
 
-		private static PlacementDocument fromDomain(
-				CellPlacement placement)
+		@SerializedName("fallbackExactItemId")
+		private int fallbackExactItemId;
+
+		@SerializedName("lastProjectedExactItemId")
+		private int lastProjectedExactItemId;
+
+		private static SlotDocument fromDomain(
+				BankTagSlotBinding slot)
 		{
-			PlacementDocument document =
-					new PlacementDocument();
+			SlotDocument document =
+					new SlotDocument();
+
+			CellPlacement placement =
+					slot.getPlacement();
 
 			document.cellId = placement.getCellId();
 			document.definitionId =
@@ -467,15 +472,28 @@ public final class PriorityStateCodec
 
 			document.index = placement.getIndex();
 
+			document.fallbackExactItemId =
+					slot.getFallbackExactItemId();
+
+			document.lastProjectedExactItemId =
+					slot.getLastProjectedExactItemId();
+
 			return document;
 		}
 
-		private CellPlacement toDomain()
+		private BankTagSlotBinding toDomain()
 		{
-			return new CellPlacement(
-					cellId,
-					definitionId,
-					index
+			CellPlacement placement =
+					new CellPlacement(
+							cellId,
+							definitionId,
+							index
+					);
+
+			return new BankTagSlotBinding(
+					placement,
+					fallbackExactItemId,
+					lastProjectedExactItemId
 			);
 		}
 	}

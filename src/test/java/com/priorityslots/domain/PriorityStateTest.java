@@ -22,7 +22,7 @@ public class PriorityStateTest
 
 		assertTrue(state.getDefinitions().isEmpty());
 		assertTrue(state.getGroups().isEmpty());
-		assertTrue(state.getViews().isEmpty());
+		assertTrue(state.getBindings().isEmpty());
 
 		assertTrue(state.definitionsById().isEmpty());
 		assertTrue(state.groupsById().isEmpty());
@@ -40,8 +40,8 @@ public class PriorityStateTest
 						definition.getId()
 				);
 
-		PriorityView view =
-				createView("view-1");
+		BankTagBinding view =
+				createBinding("view-1");
 
 		List<PriorityDefinition> definitions =
 				new ArrayList<>();
@@ -49,23 +49,23 @@ public class PriorityStateTest
 		List<PriorityGroup> groups =
 				new ArrayList<>();
 
-		List<PriorityView> views =
+		List<BankTagBinding> bindings =
 				new ArrayList<>();
 
 		definitions.add(definition);
 		groups.add(group);
-		views.add(view);
+		bindings.add(view);
 
 		PriorityState state =
 				new PriorityState(
 						definitions,
 						groups,
-						views
+						bindings
 				);
 
 		definitions.clear();
 		groups.clear();
-		views.clear();
+		bindings.clear();
 
 		assertEquals(
 				List.of(definition),
@@ -77,7 +77,7 @@ public class PriorityStateTest
 		);
 		assertEquals(
 				List.of(view),
-				state.getViews()
+				state.getBindings()
 		);
 	}
 
@@ -192,13 +192,13 @@ public class PriorityStateTest
 	}
 
 	@Test
-	public void rejectsDuplicateViewIds()
+	public void rejectsDuplicateBindingIds()
 	{
-		PriorityView first =
-				createView("view-1");
+		BankTagBinding first =
+				createBinding("view-1");
 
-		PriorityView duplicate =
-				createView("view-1");
+		BankTagBinding duplicate =
+				createBinding("view-1");
 
 		assertIllegalArgument(() ->
 				new PriorityState(
@@ -237,7 +237,7 @@ public class PriorityStateTest
 	}
 
 	@Test
-	public void allowsUnresolvedPlacementReferences()
+	public void allowsUnresolvedBindingReferences()
 	{
 		CellPlacement placement =
 				new CellPlacement(
@@ -246,29 +246,67 @@ public class PriorityStateTest
 						4
 				);
 
-		PriorityView view =
-				new PriorityView(
-						"view-1",
-						"Unresolved view",
-						List.of(placement)
+		BankTagSlotBinding slot =
+				BankTagSlotBinding.create(
+						placement,
+						TEST_ITEM_ID
+				);
+
+		BankTagBinding binding =
+				new BankTagBinding(
+						"binding-1",
+						"Unresolved tag",
+						List.of(slot)
 				);
 
 		PriorityState state =
 				new PriorityState(
 						List.of(),
 						List.of(),
-						List.of(view)
+						List.of(binding)
 				);
 
-		assertFalse(state.getViews().isEmpty());
+		assertFalse(state.getBindings().isEmpty());
 
 		assertEquals(
 				"missing-definition",
-				state.getViews()
+				state.getBindings()
 						.get(0)
-						.getPlacements()
+						.getSlots()
 						.get(0)
+						.getPlacement()
 						.getDefinitionId()
+		);
+	}
+
+	@Test
+	public void createsBindingLookupByStableId()
+	{
+		BankTagBinding first =
+				createBinding("binding-1");
+
+		BankTagBinding second =
+				createBinding("binding-2");
+
+		PriorityState state =
+				new PriorityState(
+						List.of(),
+						List.of(),
+						List.of(first, second)
+				);
+
+		Map<String, BankTagBinding> bindingsById =
+				state.bindingsById();
+
+		assertEquals(2, bindingsById.size());
+
+		assertSame(
+				first,
+				bindingsById.get("binding-1")
+		);
+		assertSame(
+				second,
+				bindingsById.get("binding-2")
 		);
 	}
 
@@ -299,11 +337,11 @@ public class PriorityStateTest
 		);
 	}
 
-	private static PriorityView createView(String id)
+	private static BankTagBinding createBinding(String id)
 	{
-		return new PriorityView(
+		return new BankTagBinding(
 				id,
-				id + " name",
+				id + " tag",
 				List.of()
 		);
 	}

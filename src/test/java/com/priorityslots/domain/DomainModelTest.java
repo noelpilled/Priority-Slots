@@ -180,34 +180,6 @@ public class DomainModelTest
 	}
 
 	@Test
-	public void priorityViewCopiesPlacementList()
-	{
-		CellPlacement placement =
-				new CellPlacement(
-						"cell-1",
-						"definition-1",
-						3
-				);
-
-		List<CellPlacement> placements =
-				new ArrayList<>();
-		placements.add(placement);
-
-		PriorityView view = new PriorityView(
-				"view-1",
-				"Teleport Jewellery",
-				placements
-		);
-
-		placements.clear();
-
-		assertEquals(
-				List.of(placement),
-				view.getPlacements()
-		);
-	}
-
-	@Test
 	public void bankSnapshotKeepsExactIdsSeparate()
 	{
 		BankSnapshot snapshot =

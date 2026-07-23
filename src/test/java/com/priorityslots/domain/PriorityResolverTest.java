@@ -251,7 +251,7 @@ public class PriorityResolverTest
 	}
 
 	@Test
-	public void resolveViewOrdersResultsByPlacementIndex()
+	public void resolveBindingOrdersResultsByPlacementIndex()
 	{
 		PriorityDefinition definition =
 				createDefinition();
@@ -270,19 +270,31 @@ public class PriorityResolverTest
 						1
 				);
 
-		PriorityView view =
-				new PriorityView(
-						"view-1",
-						"Test view",
+		BankTagSlotBinding ownedSlot =
+				BankTagSlotBinding.create(
+						ownedPlacement,
+						HIGH_PRIORITY_ITEM
+				);
+
+		BankTagSlotBinding missingSlot =
+				BankTagSlotBinding.create(
+						missingPlacement,
+						LOW_PRIORITY_ITEM
+				);
+
+		BankTagBinding binding =
+				new BankTagBinding(
+						"binding-1",
+						"Test tag",
 						List.of(
-								ownedPlacement,
-								missingPlacement
+								ownedSlot,
+								missingSlot
 						)
 				);
 
 		List<SlotResolution> resolutions =
-				resolver.resolveView(
-						view,
+				resolver.resolveBinding(
+						binding,
 						Map.of(
 								definition.getId(),
 								definition
