@@ -21,15 +21,24 @@ public class PriorityStateTest
 		PriorityState state = PriorityState.empty();
 
 		assertTrue(state.getDefinitions().isEmpty());
+		assertTrue(state.getGroups().isEmpty());
 		assertTrue(state.getViews().isEmpty());
+
 		assertTrue(state.definitionsById().isEmpty());
+		assertTrue(state.groupsById().isEmpty());
 	}
 
 	@Test
-	public void copiesDefinitionAndViewLists()
+	public void copiesSavedObjectLists()
 	{
 		PriorityDefinition definition =
 				createDefinition("definition-1");
+
+		PriorityGroup group =
+				createGroup(
+						"group-1",
+						definition.getId()
+				);
 
 		PriorityView view =
 				createView("view-1");
@@ -37,24 +46,34 @@ public class PriorityStateTest
 		List<PriorityDefinition> definitions =
 				new ArrayList<>();
 
+		List<PriorityGroup> groups =
+				new ArrayList<>();
+
 		List<PriorityView> views =
 				new ArrayList<>();
 
 		definitions.add(definition);
+		groups.add(group);
 		views.add(view);
 
 		PriorityState state =
 				new PriorityState(
 						definitions,
+						groups,
 						views
 				);
 
 		definitions.clear();
+		groups.clear();
 		views.clear();
 
 		assertEquals(
 				List.of(definition),
 				state.getDefinitions()
+		);
+		assertEquals(
+				List.of(group),
+				state.getGroups()
 		);
 		assertEquals(
 				List.of(view),
@@ -74,6 +93,7 @@ public class PriorityStateTest
 		PriorityState state =
 				new PriorityState(
 						List.of(first, second),
+						List.of(),
 						List.of()
 				);
 
@@ -81,6 +101,7 @@ public class PriorityStateTest
 				state.definitionsById();
 
 		assertEquals(2, definitionsById.size());
+
 		assertSame(
 				first,
 				definitionsById.get("definition-1")
@@ -88,6 +109,43 @@ public class PriorityStateTest
 		assertSame(
 				second,
 				definitionsById.get("definition-2")
+		);
+	}
+
+	@Test
+	public void createsGroupLookupByStableId()
+	{
+		PriorityGroup first =
+				createGroup(
+						"group-1",
+						"definition-1"
+				);
+
+		PriorityGroup second =
+				createGroup(
+						"group-2",
+						"definition-2"
+				);
+
+		PriorityState state =
+				new PriorityState(
+						List.of(),
+						List.of(first, second),
+						List.of()
+				);
+
+		Map<String, PriorityGroup> groupsById =
+				state.groupsById();
+
+		assertEquals(2, groupsById.size());
+
+		assertSame(
+				first,
+				groupsById.get("group-1")
+		);
+		assertSame(
+				second,
+				groupsById.get("group-2")
 		);
 	}
 
@@ -102,6 +160,31 @@ public class PriorityStateTest
 
 		assertIllegalArgument(() ->
 				new PriorityState(
+						List.of(first, duplicate),
+						List.of(),
+						List.of()
+				)
+		);
+	}
+
+	@Test
+	public void rejectsDuplicateGroupIds()
+	{
+		PriorityGroup first =
+				createGroup(
+						"group-1",
+						"definition-1"
+				);
+
+		PriorityGroup duplicate =
+				createGroup(
+						"group-1",
+						"definition-2"
+				);
+
+		assertIllegalArgument(() ->
+				new PriorityState(
+						List.of(),
 						List.of(first, duplicate),
 						List.of()
 				)
@@ -120,13 +203,41 @@ public class PriorityStateTest
 		assertIllegalArgument(() ->
 				new PriorityState(
 						List.of(),
+						List.of(),
 						List.of(first, duplicate)
 				)
 		);
 	}
 
 	@Test
-	public void allowsUnresolvedDefinitionReferences()
+	public void allowsUnresolvedGroupReferences()
+	{
+		PriorityGroup group =
+				createGroup(
+						"group-1",
+						"missing-definition"
+				);
+
+		PriorityState state =
+				new PriorityState(
+						List.of(),
+						List.of(group),
+						List.of()
+				);
+
+		assertFalse(state.getGroups().isEmpty());
+
+		assertEquals(
+				"missing-definition",
+				state.getGroups()
+						.get(0)
+						.getDefinitionIds()
+						.get(0)
+		);
+	}
+
+	@Test
+	public void allowsUnresolvedPlacementReferences()
 	{
 		CellPlacement placement =
 				new CellPlacement(
@@ -145,10 +256,12 @@ public class PriorityStateTest
 		PriorityState state =
 				new PriorityState(
 						List.of(),
+						List.of(),
 						List.of(view)
 				);
 
 		assertFalse(state.getViews().isEmpty());
+
 		assertEquals(
 				"missing-definition",
 				state.getViews()
@@ -172,6 +285,17 @@ public class PriorityStateTest
 				id,
 				id + " name",
 				List.of(tier)
+		);
+	}
+
+	private static PriorityGroup createGroup(
+			String id,
+			String definitionId)
+	{
+		return new PriorityGroup(
+				id,
+				id + " name",
+				List.of(definitionId)
 		);
 	}
 

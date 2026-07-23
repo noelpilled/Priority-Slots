@@ -1,12 +1,12 @@
 package com.priorityslots.domain;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.HashSet;
 import lombok.Value;
 import lombok.With;
 
@@ -17,10 +17,14 @@ public class PriorityState
 	List<PriorityDefinition> definitions;
 
 	@With
+	List<PriorityGroup> groups;
+
+	@With
 	List<PriorityView> views;
 
 	public PriorityState(
 			List<PriorityDefinition> definitions,
+			List<PriorityGroup> groups,
 			List<PriorityView> views)
 	{
 		Objects.requireNonNull(
@@ -28,20 +32,27 @@ public class PriorityState
 				"definitions"
 		);
 		Objects.requireNonNull(
+				groups,
+				"groups"
+		);
+		Objects.requireNonNull(
 				views,
 				"views"
 		);
 
 		validateDefinitions(definitions);
+		validateGroups(groups);
 		validateViews(views);
 
 		this.definitions = List.copyOf(definitions);
+		this.groups = List.copyOf(groups);
 		this.views = List.copyOf(views);
 	}
 
 	public static PriorityState empty()
 	{
 		return new PriorityState(
+				Collections.emptyList(),
 				Collections.emptyList(),
 				Collections.emptyList()
 		);
@@ -65,6 +76,19 @@ public class PriorityState
 		return Collections.unmodifiableMap(result);
 	}
 
+	public Map<String, PriorityGroup> groupsById()
+	{
+		Map<String, PriorityGroup> result =
+				new LinkedHashMap<>();
+
+		for (PriorityGroup group : groups)
+		{
+			result.put(group.getId(), group);
+		}
+
+		return Collections.unmodifiableMap(result);
+	}
+
 	private static void validateDefinitions(
 			List<PriorityDefinition> definitions)
 	{
@@ -83,6 +107,28 @@ public class PriorityState
 				throw new IllegalArgumentException(
 						"Duplicate definition ID: "
 								+ definition.getId()
+				);
+			}
+		}
+	}
+
+	private static void validateGroups(
+			List<PriorityGroup> groups)
+	{
+		Set<String> groupIds = new HashSet<>();
+
+		for (PriorityGroup group : groups)
+		{
+			Objects.requireNonNull(
+					group,
+					"groups must not contain null"
+			);
+
+			if (!groupIds.add(group.getId()))
+			{
+				throw new IllegalArgumentException(
+						"Duplicate group ID: "
+								+ group.getId()
 				);
 			}
 		}
