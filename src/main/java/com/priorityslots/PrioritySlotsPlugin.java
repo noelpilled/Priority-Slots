@@ -21,7 +21,9 @@ import java.util.OptionalInt;
 import java.util.Set;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ScriptID;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -171,6 +173,23 @@ public class PrioritySlotsPlugin extends Plugin
 				"Captured bank snapshot with {} exact item IDs",
 				bankSnapshot.distinctItemCount()
 		);
+	}
+
+	@Subscribe(priority = -1f)
+	public void onScriptPostFired(
+			ScriptPostFired event)
+	{
+		if (event.getScriptId()
+				!= ScriptID.BANKMAIN_BUILD)
+		{
+			return;
+		}
+
+		priorityState =
+				bankTagProjector
+						.reconcileActiveLayout(
+								priorityState
+						);
 	}
 
 	private void reloadPriorityState()

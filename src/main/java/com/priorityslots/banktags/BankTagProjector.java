@@ -141,6 +141,64 @@ public final class BankTagProjector
 		return updatedState;
 	}
 
+	public PriorityState reconcileActiveLayout(
+			PriorityState state)
+	{
+		Objects.requireNonNull(state, "state");
+
+		String activeTag =
+				bankTagsService.getActiveTag();
+
+		Layout activeLayout =
+				bankTagsService.getActiveLayout();
+
+		if (activeTag == null
+				|| activeLayout == null)
+		{
+			return state;
+		}
+
+		List<BankTagBinding> updatedBindings =
+				new ArrayList<>();
+
+		boolean stateChanged = false;
+
+		for (BankTagBinding binding
+				: state.getBindings())
+		{
+			if (!sameTag(
+					binding.getBankTagName(),
+					activeTag))
+			{
+				updatedBindings.add(binding);
+				continue;
+			}
+
+			BankTagBinding updatedBinding =
+					reconcileBinding(
+							binding,
+							activeLayout
+					);
+
+			updatedBindings.add(updatedBinding);
+
+			stateChanged |=
+					updatedBinding != binding;
+		}
+
+		if (!stateChanged)
+		{
+			return state;
+		}
+
+		PriorityState updatedState =
+				state.withBindings(updatedBindings);
+
+		stateStore.save(updatedState);
+
+		return updatedState;
+	}
+
 	public void unregisterAll()
 	{
 		for (String bankTagName
@@ -152,6 +210,112 @@ public final class BankTagProjector
 		registeredTags.clear();
 
 		cleanedManagedItemIdsByBindingId.clear();
+	}
+
+	private BankTagBinding reconcileBinding(
+			BankTagBinding binding,
+			Layout layout)
+	{
+		List<Integer> reconciledIndices =
+				new ArrayList<>();
+
+		Set<Integer> claimedIndices =
+				new HashSet<>();
+
+		boolean bindingChanged = false;
+
+		for (BankTagSlotBinding slot
+				: binding.getSlots())
+		{
+			int previousIndex =
+					slot.getPlacement().getIndex();
+
+			int expectedItemId =
+					slot.getLastProjectedExactItemId();
+
+			int reconciledIndex;
+
+			if (layout.getItemAtPos(previousIndex)
+					== expectedItemId)
+			{
+				reconciledIndex = previousIndex;
+			}
+			else
+			{
+				reconciledIndex =
+						findUniqueItemPosition(
+								layout,
+								expectedItemId
+						);
+			}
+
+			/*
+			 * Missing or duplicated items are ambiguous.
+			 * Keep the entire binding unchanged rather
+			 * than risking duplicate slot indices.
+			 */
+			if (reconciledIndex < 0
+					|| !claimedIndices.add(
+					reconciledIndex))
+			{
+				return binding;
+			}
+
+			reconciledIndices.add(
+					reconciledIndex
+			);
+
+			bindingChanged |=
+					reconciledIndex
+							!= previousIndex;
+		}
+
+		if (!bindingChanged)
+		{
+			return binding;
+		}
+
+		List<BankTagSlotBinding> updatedSlots =
+				new ArrayList<>();
+
+		for (int slotIndex = 0;
+		     slotIndex < binding.getSlots().size();
+		     slotIndex++)
+		{
+			BankTagSlotBinding slot =
+					binding.getSlots().get(slotIndex);
+
+			int reconciledIndex =
+					reconciledIndices.get(slotIndex);
+
+			if (reconciledIndex
+					== slot.getPlacement().getIndex())
+			{
+				updatedSlots.add(slot);
+				continue;
+			}
+
+			updatedSlots.add(
+					new BankTagSlotBinding(
+							slot.getPlacement().withIndex(
+									reconciledIndex
+							),
+							slot.getFallbackExactItemId(),
+							slot.getLastProjectedExactItemId()
+					)
+			);
+
+			log.debug(
+					"Priority slot {} followed item {} "
+							+ "from layout index {} to {}",
+					slot.getPlacement().getCellId(),
+					slot.getLastProjectedExactItemId(),
+					slot.getPlacement().getIndex(),
+					reconciledIndex
+			);
+		}
+
+		return binding.withSlots(updatedSlots);
 	}
 
 	private ProjectionResult projectBinding(
@@ -610,6 +774,33 @@ public final class BankTagProjector
 				);
 	}
 
+	private static int findUniqueItemPosition(
+			Layout layout,
+			int exactItemId)
+	{
+		int foundIndex = -1;
+
+		for (int index = 0;
+		     index < layout.size();
+		     index++)
+		{
+			if (layout.getItemAtPos(index)
+					!= exactItemId)
+			{
+				continue;
+			}
+
+			if (foundIndex >= 0)
+			{
+				return -1;
+			}
+
+			foundIndex = index;
+		}
+
+		return foundIndex;
+	}
+
 	private boolean isActiveTag(
 			String bankTagName)
 	{
@@ -617,8 +808,18 @@ public final class BankTagProjector
 				bankTagsService.getActiveTag();
 
 		return activeTag != null
-				&& Text.standardize(activeTag).equals(
-				Text.standardize(bankTagName)
+				&& sameTag(
+				activeTag,
+				bankTagName
+		);
+	}
+
+	private static boolean sameTag(
+			String first,
+			String second)
+	{
+		return Text.standardize(first).equals(
+				Text.standardize(second)
 		);
 	}
 
