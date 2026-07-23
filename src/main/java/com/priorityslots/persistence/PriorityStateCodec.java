@@ -133,7 +133,7 @@ public final class PriorityStateCodec
 		private List<GroupDocument> groups;
 
 		@SerializedName("bindings")
-		private List<ViewDocument> bindings;
+		private List<BindingDocument> bindings;
 
 		private static StateDocument fromDomain(
 				PriorityState state)

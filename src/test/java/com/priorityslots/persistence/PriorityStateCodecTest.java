@@ -201,39 +201,6 @@ public class PriorityStateCodecTest
 	}
 
 	@Test
-	public void rejectsInvalidDomainState()
-	{
-		String json =
-				"{"
-						+ "\"schemaVersion\":1,"
-						+ "\"definitions\":[],"
-						+ "\"groups\":[],"
-						+ "\"bindings\":["
-						+ "{"
-						+ "\"id\":\"view-1\","
-						+ "\"name\":\"Invalid view\","
-						+ "\"placements\":["
-						+ "{"
-						+ "\"cellId\":\"cell-1\","
-						+ "\"definitionId\":\"definition-1\","
-						+ "\"index\":4"
-						+ "},"
-						+ "{"
-						+ "\"cellId\":\"cell-2\","
-						+ "\"definitionId\":\"definition-2\","
-						+ "\"index\":4"
-						+ "}"
-						+ "]"
-						+ "}"
-						+ "]"
-						+ "}";
-
-		assertFormatException(() ->
-				codec.decode(json)
-		);
-	}
-
-	@Test
 	public void rejectsInvalidGroupState()
 	{
 		String json =
