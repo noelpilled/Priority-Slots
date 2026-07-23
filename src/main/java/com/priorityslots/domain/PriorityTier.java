@@ -3,53 +3,64 @@ package com.priorityslots.domain;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+
 import lombok.Value;
 import lombok.With;
 
 @Value
-public class PriorityTier
-{
-    String id;
+public class PriorityTier {
+	String id;
 
-    @With
-    List<Integer> exactItemIds;
+	@With
+	List<Integer> exactItemIds;
 
-    public PriorityTier(String id, List<Integer> exactItemIds)
-    {
-        this.id = requireNonBlank(id, "id");
-        Objects.requireNonNull(exactItemIds, "exactItemIds");
+	public PriorityTier(String id, List<Integer> exactItemIds)
+	{
+		this.id = requireNonBlank(id, "id");
+		Objects.requireNonNull(exactItemIds, "exactItemIds");
 
-        for (Integer itemId : exactItemIds)
-        {
-            if (itemId == null || itemId <= 0)
-            {
-                throw new IllegalArgumentException(
-                        "exactItemIds must contain only positive item IDs"
-                );
-            }
-        }
+		if (exactItemIds.isEmpty())
+		{
+			throw new IllegalArgumentException(
+					"exactItemIds must not be empty"
+			);
+		}
 
-        this.exactItemIds = List.copyOf(exactItemIds);
-    }
+		for (Integer itemId : exactItemIds)
+		{
+			if (itemId == null || itemId <= 0)
+			{
+				throw new IllegalArgumentException(
+						"exactItemIds must contain only positive item IDs"
+				);
+			}
+		}
 
-    public static PriorityTier create(List<Integer> exactItemIds)
-    {
-        return new PriorityTier(
-                UUID.randomUUID().toString(),
-                exactItemIds
-        );
-    }
+		if (exactItemIds.stream().distinct().count() != exactItemIds.size())
+		{
+			throw new IllegalArgumentException(
+					"exactItemIds must not contain duplicates"
+			);
+		}
 
-    private static String requireNonBlank(String value, String fieldName)
-    {
-        Objects.requireNonNull(value, fieldName);
+		this.exactItemIds = List.copyOf(exactItemIds);
+	}
 
-        String trimmed = value.trim();
-        if (trimmed.isEmpty())
-        {
-            throw new IllegalArgumentException(fieldName + " must not be blank");
-        }
+	public static PriorityTier create(List<Integer> exactItemIds) {
+		return new PriorityTier(
+				UUID.randomUUID().toString(),
+				exactItemIds
+		);
+	}
 
-        return trimmed;
-    }
+	private static String requireNonBlank(String value, String fieldName) {
+		Objects.requireNonNull(value, fieldName);
+
+		String trimmed = value.trim();
+		if (trimmed.isEmpty()) {
+			throw new IllegalArgumentException(fieldName + " must not be blank");
+		}
+
+		return trimmed;
+	}
 }
