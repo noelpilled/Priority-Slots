@@ -21,6 +21,8 @@ import java.util.OptionalInt;
 import java.util.Set;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.ScriptPostFired;
@@ -54,6 +56,9 @@ public class PrioritySlotsPlugin extends Plugin
 			new BankSnapshotFactory();
 
 	@Inject
+	private Client client;
+
+	@Inject
 	private PriorityStateStore priorityStateStore;
 
 	@Inject
@@ -77,6 +82,8 @@ public class PrioritySlotsPlugin extends Plugin
 	private BankSnapshot bankSnapshot =
 			BankSnapshot.empty();
 
+	private boolean bankSnapshotKnown;
+
 	@Provides
 	PrioritySlotsConfig provideConfig(
 			ConfigManager configManager)
@@ -91,6 +98,14 @@ public class PrioritySlotsPlugin extends Plugin
 	{
 		reloadPriorityState();
 
+		/*
+		 * Re-enabling the plugin while the bank is already open
+		 * may not produce a new ItemContainerChanged event.
+		 */
+		clientThread.invokeLater(
+				this::synchronizeFromCurrentBankIfAvailable
+		);
+
 		log.debug("Priority Slots started");
 	}
 
@@ -104,6 +119,7 @@ public class PrioritySlotsPlugin extends Plugin
 
 		priorityState = PriorityState.empty();
 		bankSnapshot = BankSnapshot.empty();
+		bankSnapshotKnown = false;
 
 		log.debug("Priority Slots stopped");
 	}
@@ -114,6 +130,16 @@ public class PrioritySlotsPlugin extends Plugin
 	{
 		bankTagProjector.unregisterAll();
 
+		priorityState = PriorityState.empty();
+		bankSnapshot = BankSnapshot.empty();
+		bankSnapshotKnown = false;
+
+		/*
+		 * Do not inspect the current bank container here.
+		 * During a profile transition it may still belong
+		 * to the previous profile. Wait for the next real
+		 * bank container event instead.
+		 */
 		reloadPriorityState();
 	}
 
@@ -159,19 +185,8 @@ public class PrioritySlotsPlugin extends Plugin
 			return;
 		}
 
-		bankSnapshot = bankSnapshotFactory.create(
+		captureBankSnapshot(
 				event.getItemContainer()
-		);
-
-		priorityState =
-				bankTagProjector.synchronize(
-						priorityState,
-						bankSnapshot
-				);
-
-		log.debug(
-				"Captured bank snapshot with {} exact item IDs",
-				bankSnapshot.distinctItemCount()
 		);
 	}
 
@@ -180,7 +195,8 @@ public class PrioritySlotsPlugin extends Plugin
 			ScriptPostFired event)
 	{
 		if (event.getScriptId()
-				!= ScriptID.BANKMAIN_BUILD)
+				!= ScriptID.BANKMAIN_BUILD
+				|| !bankSnapshotKnown)
 		{
 			return;
 		}
@@ -204,18 +220,46 @@ public class PrioritySlotsPlugin extends Plugin
 				priorityState.getGroups().size(),
 				priorityState.getBindings().size()
 		);
+	}
 
-		/*
-		 * Startup can occur on the Swing event thread.
-		 * Layout projection must run on RuneLite's
-		 * client thread.
-		 */
-		clientThread.invokeLater(() ->
-				priorityState =
-						bankTagProjector.synchronize(
-								priorityState,
-								bankSnapshot
-						)
+	private void synchronizeFromCurrentBankIfAvailable()
+	{
+		ItemContainer currentBank =
+				client.getItemContainer(
+						InventoryID.BANK
+				);
+
+		if (currentBank == null)
+		{
+			log.debug(
+					"Bank snapshot is not available; "
+							+ "Priority Slots projection is deferred"
+			);
+
+			return;
+		}
+
+		captureBankSnapshot(currentBank);
+	}
+
+	private void captureBankSnapshot(
+			ItemContainer itemContainer)
+	{
+		bankSnapshot = bankSnapshotFactory.create(
+				itemContainer
+		);
+
+		bankSnapshotKnown = true;
+
+		priorityState =
+				bankTagProjector.synchronize(
+						priorityState,
+						bankSnapshot
+				);
+
+		log.debug(
+				"Captured bank snapshot with {} exact item IDs",
+				bankSnapshot.distinctItemCount()
 		);
 	}
 
@@ -335,12 +379,24 @@ public class PrioritySlotsPlugin extends Plugin
 					);
 
 			priorityStateStore.save(newState);
+			priorityState = newState;
 
-			priorityState =
-					bankTagProjector.synchronize(
-							newState,
-							bankSnapshot
-					);
+			if (bankSnapshotKnown)
+			{
+				priorityState =
+						bankTagProjector.synchronize(
+								priorityState,
+								bankSnapshot
+						);
+			}
+			else
+			{
+				log.debug(
+						"Saved MVP priority slot; "
+								+ "projection is deferred until "
+								+ "a bank snapshot is available"
+				);
+			}
 
 			log.info(
 					"Applied MVP priority slot to "
