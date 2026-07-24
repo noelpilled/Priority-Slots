@@ -2,7 +2,6 @@ package com.priorityslots.domain;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -23,338 +22,276 @@ public class PriorityStateTest
 		assertTrue(state.getDefinitions().isEmpty());
 		assertTrue(state.getGroups().isEmpty());
 		assertTrue(state.getBindings().isEmpty());
-
-		assertTrue(state.definitionsById().isEmpty());
-		assertTrue(state.groupsById().isEmpty());
+		assertTrue(state.getRootEntries().isEmpty());
 	}
 
 	@Test
-	public void copiesSavedObjectLists()
+	public void copiesAllSavedObjectLists()
 	{
 		PriorityDefinition definition =
-				createDefinition("definition-1");
-
-		PriorityGroup group =
-				createGroup(
-						"group-1",
-						definition.getId()
-				);
-
-		BankTagBinding view =
-				createBinding("view-1");
+			createDefinition("definition-1");
+		PriorityGroup group = new PriorityGroup(
+			"group-1",
+			"Group",
+			List.of(
+				PriorityLibraryEntry.definition(
+					definition.getId()
+				)
+			)
+		);
+		BankTagBinding binding = createBinding("binding-1");
 
 		List<PriorityDefinition> definitions =
-				new ArrayList<>();
-
+			new ArrayList<>(List.of(definition));
 		List<PriorityGroup> groups =
-				new ArrayList<>();
-
+			new ArrayList<>(List.of(group));
 		List<BankTagBinding> bindings =
-				new ArrayList<>();
+			new ArrayList<>(List.of(binding));
+		List<PriorityLibraryEntry> roots =
+			new ArrayList<>(List.of(
+				PriorityLibraryEntry.group(group.getId())
+			));
 
-		definitions.add(definition);
-		groups.add(group);
-		bindings.add(view);
-
-		PriorityState state =
-				new PriorityState(
-						definitions,
-						groups,
-						bindings
-				);
+		PriorityState state = new PriorityState(
+			definitions,
+			groups,
+			bindings,
+			roots
+		);
 
 		definitions.clear();
 		groups.clear();
 		bindings.clear();
+		roots.clear();
+
+		assertEquals(List.of(definition), state.getDefinitions());
+		assertEquals(List.of(group), state.getGroups());
+		assertEquals(List.of(binding), state.getBindings());
+		assertEquals(
+			List.of(PriorityLibraryEntry.group(group.getId())),
+			state.getRootEntries()
+		);
+	}
+
+	@Test
+	public void threeArgumentConstructorDerivesRootTree()
+	{
+		PriorityDefinition grouped =
+			createDefinition("definition-grouped");
+		PriorityDefinition ungrouped =
+			createDefinition("definition-root");
+		PriorityGroup group = new PriorityGroup(
+			"group-1",
+			"Group",
+			List.of(
+				PriorityLibraryEntry.definition(grouped.getId())
+			)
+		);
+
+		PriorityState state = new PriorityState(
+			List.of(grouped, ungrouped),
+			List.of(group),
+			List.of()
+		);
 
 		assertEquals(
+			List.of(
+				PriorityLibraryEntry.group(group.getId()),
+				PriorityLibraryEntry.definition(
+					ungrouped.getId()
+				)
+			),
+			state.getRootEntries()
+		);
+	}
+
+	@Test
+	public void supportsNestedGroups()
+	{
+		PriorityDefinition definition =
+			createDefinition("definition-1");
+		PriorityGroup child = new PriorityGroup(
+			"group-child",
+			"Child",
+			List.of(
+				PriorityLibraryEntry.definition(
+					definition.getId()
+				)
+			)
+		);
+		PriorityGroup parent = new PriorityGroup(
+			"group-parent",
+			"Parent",
+			List.of(PriorityLibraryEntry.group(child.getId()))
+		);
+
+		PriorityState state = new PriorityState(
+			List.of(definition),
+			List.of(parent, child),
+			List.of(),
+			List.of(PriorityLibraryEntry.group(parent.getId()))
+		);
+
+		assertSame(parent, state.groupsById().get(parent.getId()));
+		assertSame(child, state.groupsById().get(child.getId()));
+	}
+
+	@Test
+	public void rejectsDefinitionMissingFromLibrary()
+	{
+		PriorityDefinition definition =
+			createDefinition("definition-1");
+
+		assertIllegalArgument(() ->
+			new PriorityState(
 				List.of(definition),
-				state.getDefinitions()
-		);
-		assertEquals(
-				List.of(group),
-				state.getGroups()
-		);
-		assertEquals(
-				List.of(view),
-				state.getBindings()
+				List.of(),
+				List.of(),
+				List.of()
+			)
 		);
 	}
 
 	@Test
-	public void createsDefinitionLookupByStableId()
+	public void rejectsUnknownLibraryReference()
 	{
-		PriorityDefinition first =
-				createDefinition("definition-1");
-
-		PriorityDefinition second =
-				createDefinition("definition-2");
-
-		PriorityState state =
-				new PriorityState(
-						List.of(first, second),
-						List.of(),
-						List.of()
-				);
-
-		Map<String, PriorityDefinition> definitionsById =
-				state.definitionsById();
-
-		assertEquals(2, definitionsById.size());
-
-		assertSame(
-				first,
-				definitionsById.get("definition-1")
-		);
-		assertSame(
-				second,
-				definitionsById.get("definition-2")
-		);
-	}
-
-	@Test
-	public void createsGroupLookupByStableId()
-	{
-		PriorityGroup first =
-				createGroup(
-						"group-1",
-						"definition-1"
-				);
-
-		PriorityGroup second =
-				createGroup(
-						"group-2",
-						"definition-2"
-				);
-
-		PriorityState state =
-				new PriorityState(
-						List.of(),
-						List.of(first, second),
-						List.of()
-				);
-
-		Map<String, PriorityGroup> groupsById =
-				state.groupsById();
-
-		assertEquals(2, groupsById.size());
-
-		assertSame(
-				first,
-				groupsById.get("group-1")
-		);
-		assertSame(
-				second,
-				groupsById.get("group-2")
-		);
-	}
-
-	@Test
-	public void rejectsDuplicateDefinitionIds()
-	{
-		PriorityDefinition first =
-				createDefinition("definition-1");
-
-		PriorityDefinition duplicate =
-				createDefinition("definition-1");
-
 		assertIllegalArgument(() ->
-				new PriorityState(
-						List.of(first, duplicate),
-						List.of(),
-						List.of()
-				)
-		);
-	}
-
-	@Test
-	public void rejectsDuplicateGroupIds()
-	{
-		PriorityGroup first =
-				createGroup(
-						"group-1",
-						"definition-1"
-				);
-
-		PriorityGroup duplicate =
-				createGroup(
-						"group-1",
-						"definition-2"
-				);
-
-		assertIllegalArgument(() ->
-				new PriorityState(
-						List.of(),
-						List.of(first, duplicate),
-						List.of()
-				)
-		);
-	}
-
-	@Test
-	public void rejectsDuplicateBindingIds()
-	{
-		BankTagBinding first =
-				createBinding("view-1");
-
-		BankTagBinding duplicate =
-				createBinding("view-1");
-
-		assertIllegalArgument(() ->
-				new PriorityState(
-						List.of(),
-						List.of(),
-						List.of(first, duplicate)
-				)
-		);
-	}
-
-	@Test
-	public void allowsUnresolvedGroupReferences()
-	{
-		PriorityGroup group =
-				createGroup(
-						"group-1",
+			new PriorityState(
+				List.of(),
+				List.of(),
+				List.of(),
+				List.of(
+					PriorityLibraryEntry.definition(
 						"missing-definition"
-				);
-
-		PriorityState state =
-				new PriorityState(
-						List.of(),
-						List.of(group),
-						List.of()
-				);
-
-		assertFalse(state.getGroups().isEmpty());
-
-		assertEquals(
-				"missing-definition",
-				state.getGroups()
-						.get(0)
-						.getDefinitionIds()
-						.get(0)
+					)
+				)
+			)
 		);
 	}
 
 	@Test
-	public void allowsUnresolvedBindingReferences()
+	public void rejectsDuplicateLibraryPlacement()
 	{
-		CellPlacement placement =
-				new CellPlacement(
-						"cell-1",
-						"missing-definition",
-						4
-				);
+		PriorityDefinition definition =
+			createDefinition("definition-1");
 
-		BankTagSlotBinding slot =
-				BankTagSlotBinding.create(
-						placement,
-						TEST_ITEM_ID
-				);
+		assertIllegalArgument(() ->
+			new PriorityState(
+				List.of(definition),
+				List.of(),
+				List.of(),
+				List.of(
+					PriorityLibraryEntry.definition(
+						definition.getId()
+					),
+					PriorityLibraryEntry.definition(
+						definition.getId()
+					)
+				)
+			)
+		);
+	}
 
-		BankTagBinding binding =
-				new BankTagBinding(
-						"binding-1",
-						"Unresolved tag",
-						List.of(slot)
-				);
+	@Test
+	public void rejectsNestedGroupCycle()
+	{
+		PriorityGroup first = new PriorityGroup(
+			"group-1",
+			"First",
+			List.of(PriorityLibraryEntry.group("group-2"))
+		);
+		PriorityGroup second = new PriorityGroup(
+			"group-2",
+			"Second",
+			List.of(PriorityLibraryEntry.group("group-1"))
+		);
 
-		PriorityState state =
-				new PriorityState(
-						List.of(),
-						List.of(),
-						List.of(binding)
-				);
+		assertIllegalArgument(() ->
+			new PriorityState(
+				List.of(),
+				List.of(first, second),
+				List.of(),
+				List.of(PriorityLibraryEntry.group(first.getId()))
+			)
+		);
+	}
+
+	@Test
+	public void allowsUnresolvedBindingDefinitionReference()
+	{
+		CellPlacement placement = new CellPlacement(
+			"cell-1",
+			"missing-definition",
+			4
+		);
+		BankTagSlotBinding slot = BankTagSlotBinding.create(
+			placement,
+			TEST_ITEM_ID
+		);
+		BankTagBinding binding = new BankTagBinding(
+			"binding-1",
+			"Unresolved tag",
+			List.of(slot)
+		);
+
+		PriorityState state = new PriorityState(
+			List.of(),
+			List.of(),
+			List.of(binding),
+			List.of()
+		);
 
 		assertFalse(state.getBindings().isEmpty());
-
-		assertEquals(
-				"missing-definition",
-				state.getBindings()
-						.get(0)
-						.getSlots()
-						.get(0)
-						.getPlacement()
-						.getDefinitionId()
-		);
 	}
 
 	@Test
-	public void createsBindingLookupByStableId()
+	public void rejectsDuplicateStableIds()
 	{
-		BankTagBinding first =
-				createBinding("binding-1");
+		PriorityDefinition first =
+			createDefinition("definition-1");
+		PriorityDefinition duplicate =
+			createDefinition("definition-1");
 
-		BankTagBinding second =
-				createBinding("binding-2");
-
-		PriorityState state =
-				new PriorityState(
-						List.of(),
-						List.of(),
-						List.of(first, second)
-				);
-
-		Map<String, BankTagBinding> bindingsById =
-				state.bindingsById();
-
-		assertEquals(2, bindingsById.size());
-
-		assertSame(
-				first,
-				bindingsById.get("binding-1")
-		);
-		assertSame(
-				second,
-				bindingsById.get("binding-2")
+		assertIllegalArgument(() ->
+			new PriorityState(
+				List.of(first, duplicate),
+				List.of(),
+				List.of()
+			)
 		);
 	}
 
 	private static PriorityDefinition createDefinition(
-			String id)
+		String id)
 	{
-		PriorityTier tier =
-				new PriorityTier(
-						id + "-tier",
-						List.of(TEST_ITEM_ID)
-				);
-
 		return new PriorityDefinition(
-				id,
-				id + " name",
-				List.of(tier)
-		);
-	}
-
-	private static PriorityGroup createGroup(
-			String id,
-			String definitionId)
-	{
-		return new PriorityGroup(
-				id,
-				id + " name",
-				List.of(definitionId)
+			id,
+			id + " name",
+			List.of(
+				new PriorityTier(
+					id + "-tier",
+					List.of(TEST_ITEM_ID)
+				)
+			)
 		);
 	}
 
 	private static BankTagBinding createBinding(String id)
 	{
 		return new BankTagBinding(
-				id,
-				id + " tag",
-				List.of()
+			id,
+			id + " tag",
+			List.of()
 		);
 	}
 
 	private static void assertIllegalArgument(
-			Runnable action)
+		Runnable action)
 	{
 		try
 		{
 			action.run();
-			fail(
-					"Expected IllegalArgumentException"
-			);
+			fail("Expected IllegalArgumentException");
 		}
 		catch (IllegalArgumentException expected)
 		{

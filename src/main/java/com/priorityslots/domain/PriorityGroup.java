@@ -18,67 +18,62 @@ public class PriorityGroup
 	String name;
 
 	@With
-	List<String> definitionIds;
+	List<PriorityLibraryEntry> children;
 
 	public PriorityGroup(
-			String id,
-			String name,
-			List<String> definitionIds)
+		String id,
+		String name,
+		List<PriorityLibraryEntry> children)
 	{
 		this.id = requireNonBlank(id, "id");
 		this.name = requireNonBlank(name, "name");
 
-		Objects.requireNonNull(
-				definitionIds,
-				"definitionIds"
-		);
+		Objects.requireNonNull(children, "children");
 
-		List<String> normalizedDefinitionIds =
-				new ArrayList<>();
+		List<PriorityLibraryEntry> copiedChildren =
+			new ArrayList<>();
 
-		Set<String> seenDefinitionIds =
-				new HashSet<>();
+		Set<PriorityLibraryEntry> seenChildren =
+			new HashSet<>();
 
-		for (String definitionId : definitionIds)
+		for (PriorityLibraryEntry child : children)
 		{
-			String normalizedDefinitionId =
-					requireNonBlank(
-							definitionId,
-							"definitionIds entry"
-					);
+			PriorityLibraryEntry requiredChild =
+				Objects.requireNonNull(
+					child,
+					"children must not contain null"
+				);
 
-			if (!seenDefinitionIds.add(
-					normalizedDefinitionId))
+			if (!seenChildren.add(requiredChild))
 			{
 				throw new IllegalArgumentException(
-						"Duplicate definition ID: "
-								+ normalizedDefinitionId
+					"Duplicate group child: "
+						+ requiredChild.getType()
+						+ " "
+						+ requiredChild.getTargetId()
 				);
 			}
 
-			normalizedDefinitionIds.add(
-					normalizedDefinitionId
-			);
+			copiedChildren.add(requiredChild);
 		}
 
-		this.definitionIds =
-				List.copyOf(normalizedDefinitionIds);
+		this.children = List.copyOf(copiedChildren);
 	}
 
 	public static PriorityGroup create(
-			String name,
-			List<String> definitionIds)
+		String name,
+		List<PriorityLibraryEntry> children)
 	{
 		return new PriorityGroup(
-				UUID.randomUUID().toString(),
-				name,
-				definitionIds
+			UUID.randomUUID().toString(),
+			name,
+			children
 		);
 	}
 
 	private static String requireNonBlank(
-			String value,
-			String fieldName)
+		String value,
+		String fieldName)
 	{
 		Objects.requireNonNull(value, fieldName);
 
@@ -86,7 +81,7 @@ public class PriorityGroup
 		if (trimmed.isEmpty())
 		{
 			throw new IllegalArgumentException(
-					fieldName + " must not be blank"
+				fieldName + " must not be blank"
 			);
 		}
 

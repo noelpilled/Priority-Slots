@@ -11,164 +11,103 @@ import static org.junit.Assert.fail;
 public class PriorityGroupTest
 {
 	@Test
-	public void preservesDefinitionOrder()
+	public void preservesOrderedNestedChildren()
 	{
-		PriorityGroup group =
-				new PriorityGroup(
-						"group-1",
-						"Melee gear",
-						List.of(
-								"helmet-definition",
-								"body-definition",
-								"legs-definition"
-						)
-				);
-
-		assertEquals(
-				List.of(
-						"helmet-definition",
-						"body-definition",
-						"legs-definition"
-				),
-				group.getDefinitionIds()
-		);
-	}
-
-	@Test
-	public void copiesDefinitionIdList()
-	{
-		List<String> definitionIds =
-				new ArrayList<>();
-
-		definitionIds.add("helmet-definition");
-
-		PriorityGroup group =
-				new PriorityGroup(
-						"group-1",
-						"Melee gear",
-						definitionIds
-				);
-
-		definitionIds.add("body-definition");
-
-		assertEquals(
-				List.of("helmet-definition"),
-				group.getDefinitionIds()
-		);
-	}
-
-	@Test
-	public void renamingPreservesIdentity()
-	{
-		PriorityGroup original =
-				new PriorityGroup(
-						"group-1",
-						"Old name",
-						List.of()
-				);
-
-		PriorityGroup renamed =
-				original.withName("New name");
-
-		assertEquals(
-				original.getId(),
-				renamed.getId()
-		);
-		assertEquals(
-				"New name",
-				renamed.getName()
-		);
-		assertNotEquals(
-				original.getName(),
-				renamed.getName()
-		);
-	}
-
-	@Test
-	public void allowsEmptyDefinitionList()
-	{
-		PriorityGroup group =
-				new PriorityGroup(
-						"group-1",
-						"Empty draft",
-						List.of()
-				);
-
-		assertEquals(
-				List.of(),
-				group.getDefinitionIds()
-		);
-	}
-
-	@Test
-	public void trimsDefinitionIds()
-	{
-		PriorityGroup group =
-				new PriorityGroup(
-						"group-1",
-						"Melee gear",
-						List.of(
-								"  helmet-definition  "
-						)
-				);
-
-		assertEquals(
-				List.of("helmet-definition"),
-				group.getDefinitionIds()
-		);
-	}
-
-	@Test
-	public void rejectsDuplicateDefinitionIds()
-	{
-		assertIllegalArgument(() ->
-				new PriorityGroup(
-						"group-1",
-						"Melee gear",
-						List.of(
-								"helmet-definition",
-								"helmet-definition"
-						)
+		PriorityGroup group = new PriorityGroup(
+			"group-1",
+			"Herblore",
+			List.of(
+				PriorityLibraryEntry.group("group-herbs"),
+				PriorityLibraryEntry.definition(
+					"definition-potions"
 				)
+			)
+		);
+
+		assertEquals(
+			List.of(
+				PriorityLibraryEntry.group("group-herbs"),
+				PriorityLibraryEntry.definition(
+					"definition-potions"
+				)
+			),
+			group.getChildren()
 		);
 	}
 
 	@Test
-	public void rejectsDuplicatesAfterTrimming()
+	public void copiesChildList()
 	{
+		List<PriorityLibraryEntry> children =
+			new ArrayList<>();
+		children.add(
+			PriorityLibraryEntry.definition("definition-1")
+		);
+
+		PriorityGroup group = new PriorityGroup(
+			"group-1",
+			"Herblore",
+			children
+		);
+
+		children.clear();
+
+		assertEquals(1, group.getChildren().size());
+	}
+
+	@Test
+	public void renamingPreservesIdentityAndChildren()
+	{
+		PriorityGroup original = new PriorityGroup(
+			"group-1",
+			"Old name",
+			List.of(
+				PriorityLibraryEntry.definition("definition-1")
+			)
+		);
+
+		PriorityGroup renamed = original.withName("New name");
+
+		assertEquals(original.getId(), renamed.getId());
+		assertEquals(original.getChildren(), renamed.getChildren());
+		assertEquals("New name", renamed.getName());
+		assertNotEquals(original.getName(), renamed.getName());
+	}
+
+	@Test
+	public void rejectsDuplicateChildren()
+	{
+		PriorityLibraryEntry child =
+			PriorityLibraryEntry.definition("definition-1");
+
 		assertIllegalArgument(() ->
-				new PriorityGroup(
-						"group-1",
-						"Melee gear",
-						List.of(
-								"helmet-definition",
-								" helmet-definition "
-						)
-				)
+			new PriorityGroup(
+				"group-1",
+				"Herblore",
+				List.of(child, child)
+			)
 		);
 	}
 
 	@Test
-	public void rejectsBlankDefinitionId()
+	public void allowsEmptyChildren()
 	{
-		assertIllegalArgument(() ->
-				new PriorityGroup(
-						"group-1",
-						"Melee gear",
-						List.of(" ")
-				)
+		PriorityGroup group = new PriorityGroup(
+			"group-1",
+			"Empty group",
+			List.of()
 		);
+
+		assertEquals(List.of(), group.getChildren());
 	}
 
 	private static void assertIllegalArgument(
-			Runnable action)
+		Runnable action)
 	{
 		try
 		{
 			action.run();
-			fail(
-					"Expected IllegalArgumentException"
-			);
+			fail("Expected IllegalArgumentException");
 		}
 		catch (IllegalArgumentException expected)
 		{
