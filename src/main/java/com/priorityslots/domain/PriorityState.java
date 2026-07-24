@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Set;
 import lombok.Value;
 import lombok.With;
+import net.runelite.client.util.Text;
 
 @Value
 public class PriorityState
@@ -23,21 +24,21 @@ public class PriorityState
 	List<BankTagBinding> bindings;
 
 	public PriorityState(
-			List<PriorityDefinition> definitions,
-			List<PriorityGroup> groups,
-			List<BankTagBinding> bindings)
+		List<PriorityDefinition> definitions,
+		List<PriorityGroup> groups,
+		List<BankTagBinding> bindings)
 	{
 		Objects.requireNonNull(
-				definitions,
-				"definitions"
+			definitions,
+			"definitions"
 		);
 		Objects.requireNonNull(
-				groups,
-				"groups"
+			groups,
+			"groups"
 		);
 		Objects.requireNonNull(
-				bindings,
-				"bindings"
+			bindings,
+			"bindings"
 		);
 
 		validateDefinitions(definitions);
@@ -52,9 +53,9 @@ public class PriorityState
 	public static PriorityState empty()
 	{
 		return new PriorityState(
-				Collections.emptyList(),
-				Collections.emptyList(),
-				Collections.emptyList()
+			Collections.emptyList(),
+			Collections.emptyList(),
+			Collections.emptyList()
 		);
 	}
 
@@ -62,14 +63,14 @@ public class PriorityState
 	definitionsById()
 	{
 		Map<String, PriorityDefinition> result =
-				new LinkedHashMap<>();
+			new LinkedHashMap<>();
 
 		for (PriorityDefinition definition
-				: definitions)
+			: definitions)
 		{
 			result.put(
-					definition.getId(),
-					definition
+				definition.getId(),
+				definition
 			);
 		}
 
@@ -79,7 +80,7 @@ public class PriorityState
 	public Map<String, PriorityGroup> groupsById()
 	{
 		Map<String, PriorityGroup> result =
-				new LinkedHashMap<>();
+			new LinkedHashMap<>();
 
 		for (PriorityGroup group : groups)
 		{
@@ -92,7 +93,7 @@ public class PriorityState
 	public Map<String, BankTagBinding> bindingsById()
 	{
 		Map<String, BankTagBinding> result =
-				new LinkedHashMap<>();
+			new LinkedHashMap<>();
 
 		for (BankTagBinding binding : bindings)
 		{
@@ -103,67 +104,84 @@ public class PriorityState
 	}
 
 	private static void validateDefinitions(
-			List<PriorityDefinition> definitions)
+		List<PriorityDefinition> definitions)
 	{
 		Set<String> definitionIds = new HashSet<>();
 
 		for (PriorityDefinition definition
-				: definitions)
+			: definitions)
 		{
 			Objects.requireNonNull(
-					definition,
-					"definitions must not contain null"
+				definition,
+				"definitions must not contain null"
 			);
 
 			if (!definitionIds.add(definition.getId()))
 			{
 				throw new IllegalArgumentException(
-						"Duplicate definition ID: "
-								+ definition.getId()
+					"Duplicate definition ID: "
+						+ definition.getId()
 				);
 			}
 		}
 	}
 
 	private static void validateGroups(
-			List<PriorityGroup> groups)
+		List<PriorityGroup> groups)
 	{
 		Set<String> groupIds = new HashSet<>();
 
 		for (PriorityGroup group : groups)
 		{
 			Objects.requireNonNull(
-					group,
-					"groups must not contain null"
+				group,
+				"groups must not contain null"
 			);
 
 			if (!groupIds.add(group.getId()))
 			{
 				throw new IllegalArgumentException(
-						"Duplicate group ID: "
-								+ group.getId()
+					"Duplicate group ID: "
+						+ group.getId()
 				);
 			}
 		}
 	}
 
 	private static void validateBindings(
-			List<BankTagBinding> bindings)
+		List<BankTagBinding> bindings)
 	{
 		Set<String> bindingIds = new HashSet<>();
+
+		Set<String> standardizedBankTagNames =
+			new HashSet<>();
 
 		for (BankTagBinding binding : bindings)
 		{
 			Objects.requireNonNull(
-					binding,
-					"bindings must not contain null"
+				binding,
+				"bindings must not contain null"
 			);
 
 			if (!bindingIds.add(binding.getId()))
 			{
 				throw new IllegalArgumentException(
-						"Duplicate binding ID: "
-								+ binding.getId()
+					"Duplicate binding ID: "
+						+ binding.getId()
+				);
+			}
+
+			String standardizedBankTagName =
+				Text.standardize(
+					binding.getBankTagName()
+				);
+
+			if (!standardizedBankTagNames.add(
+				standardizedBankTagName))
+			{
+				throw new IllegalArgumentException(
+					"Duplicate Bank Tag binding: "
+						+ binding.getBankTagName()
 				);
 			}
 		}

@@ -378,6 +378,8 @@ public class PrioritySlotsPlugin extends Plugin
 							List.of(binding)
 					);
 
+			bankTagProjector.unregisterAll();
+
 			priorityStateStore.save(newState);
 			priorityState = newState;
 
