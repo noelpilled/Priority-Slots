@@ -15,7 +15,9 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class PrioritySlotAuthoringServiceTest
@@ -384,6 +386,175 @@ public class PrioritySlotAuthoringServiceTest
 				"Herbs",
 				List.of(LANTADYME),
 				definition.getId()
+			)
+		);
+	}
+
+
+	@Test
+	public void identifiesInstalledSlotByActiveTagAndIndex()
+	{
+		PriorityDefinition definition = herbsDefinition();
+		BankTagSlotBinding slot = BankTagSlotBinding.create(
+			new CellPlacement(
+				"cell-herbs",
+				definition.getId(),
+				1
+			),
+			LANTADYME
+		);
+		BankTagBinding binding = new BankTagBinding(
+			"binding-herbs",
+			"Herbs",
+			List.of(slot)
+		);
+		PriorityState state = new PriorityState(
+			List.of(definition),
+			List.of(),
+			List.of(binding),
+			List.of(
+				PriorityLibraryEntry.definition(
+					definition.getId()
+				)
+			)
+		);
+
+		PrioritySlotAuthoringService service = serviceWithIds();
+
+		assertTrue(service.isInstalledSlot(
+			state,
+			" herbs ",
+			1
+		));
+		assertFalse(service.isInstalledSlot(
+			state,
+			"Herbs",
+			0
+		));
+	}
+
+	@Test
+	public void removesLastInstalledSlotAndClearsLayoutCell()
+	{
+		PriorityDefinition definition = herbsDefinition();
+		BankTagSlotBinding slot = BankTagSlotBinding.create(
+			new CellPlacement(
+				"cell-herbs",
+				definition.getId(),
+				1
+			),
+			LANTADYME
+		);
+		BankTagBinding binding = new BankTagBinding(
+			"binding-herbs",
+			"Herbs",
+			List.of(slot)
+		);
+		PriorityState state = new PriorityState(
+			List.of(definition),
+			List.of(),
+			List.of(binding),
+			List.of(
+				PriorityLibraryEntry.definition(
+					definition.getId()
+				)
+			)
+		);
+
+		PrioritySlotAuthoringService.RemovalResult result =
+			serviceWithIds().removeInstalledSlotFromActiveLayout(
+				state,
+				"herbs",
+				List.of(UNRELATED, LANTADYME, EMPTY),
+				1
+			);
+
+		assertEquals(
+			List.of(UNRELATED, EMPTY, EMPTY),
+			result.getLayoutItems()
+		);
+		assertTrue(result.getState().getBindings().isEmpty());
+		assertEquals(definition.getId(), result.getDefinitionId());
+		assertEquals("cell-herbs", result.getCellId());
+		assertEquals(1, result.getLayoutIndex());
+		assertSame(
+			definition,
+			result.getState().definitionsById().get(
+				definition.getId()
+			)
+		);
+	}
+
+	@Test
+	public void removesOneSlotAndPreservesOtherBindingCells()
+	{
+		PriorityDefinition herbs = herbsDefinition();
+		PriorityDefinition other = definition(
+			"definition-other",
+			"tier-other",
+			UNRELATED
+		);
+		BankTagSlotBinding herbsSlot = BankTagSlotBinding.create(
+			new CellPlacement(
+				"cell-herbs",
+				herbs.getId(),
+				0
+			),
+			LANTADYME
+		);
+		BankTagSlotBinding otherSlot = BankTagSlotBinding.create(
+			new CellPlacement(
+				"cell-other",
+				other.getId(),
+				2
+			),
+			UNRELATED
+		);
+		BankTagBinding binding = new BankTagBinding(
+			"binding-herbs",
+			"Herbs",
+			List.of(herbsSlot, otherSlot)
+		);
+		PriorityState state = new PriorityState(
+			List.of(herbs, other),
+			List.of(),
+			List.of(binding),
+			List.of(
+				PriorityLibraryEntry.definition(herbs.getId()),
+				PriorityLibraryEntry.definition(other.getId())
+			)
+		);
+
+		PrioritySlotAuthoringService.RemovalResult result =
+			serviceWithIds().removeInstalledSlotFromActiveLayout(
+				state,
+				"Herbs",
+				List.of(LANTADYME, EMPTY, UNRELATED),
+				0
+			);
+
+		assertEquals(
+			List.of(EMPTY, EMPTY, UNRELATED),
+			result.getLayoutItems()
+		);
+		assertEquals(1, result.getState().getBindings().size());
+		assertEquals(
+			List.of(otherSlot),
+			result.getState().getBindings().get(0).getSlots()
+		);
+	}
+
+	@Test
+	public void rejectsRemovingUnmanagedLayoutCell()
+	{
+		PriorityDefinition definition = herbsDefinition();
+
+		assertIllegalArgument(() ->
+			serviceWithIds().removeInstalledSlotFromActiveLayout(
+				stateWithDefinition(definition),
+				"Herbs",
+				List.of(LANTADYME),
+				0
 			)
 		);
 	}

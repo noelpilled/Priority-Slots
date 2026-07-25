@@ -418,6 +418,141 @@ public final class PrioritySlotAuthoringService
 		);
 	}
 
+
+	public boolean isInstalledSlot(
+		PriorityState state,
+		String activeBankTagName,
+		int layoutIndex)
+	{
+		Objects.requireNonNull(state, "state");
+
+		if (activeBankTagName == null
+			|| activeBankTagName.trim().isEmpty()
+			|| layoutIndex < 0)
+		{
+			return false;
+		}
+
+		BankTagBinding binding =
+			bindingForTag(state, activeBankTagName);
+
+		return binding != null
+			&& slotAtIndex(binding, layoutIndex) != null;
+	}
+
+	public RemovalResult removeInstalledSlotFromActiveLayout(
+		PriorityState state,
+		String activeBankTagName,
+		List<Integer> activeLayoutItems,
+		int layoutIndex)
+	{
+		Objects.requireNonNull(state, "state");
+
+		String bankTagName = requireNonBlank(
+			activeBankTagName,
+			"activeBankTagName"
+		);
+
+		if (layoutIndex < 0)
+		{
+			throw new IllegalArgumentException(
+				"layoutIndex must not be negative"
+			);
+		}
+
+		List<Integer> layoutItems = copyLayoutItems(
+			activeLayoutItems
+		);
+
+		if (layoutIndex >= layoutItems.size())
+		{
+			throw new IllegalArgumentException(
+				"layoutIndex is outside the active layout"
+			);
+		}
+
+		BankTagBinding binding =
+			bindingForTag(state, bankTagName);
+
+		if (binding == null)
+		{
+			throw new IllegalArgumentException(
+				"The active Bank Tag has no priority slots"
+			);
+		}
+
+		BankTagSlotBinding removedSlot =
+			slotAtIndex(binding, layoutIndex);
+
+		if (removedSlot == null)
+		{
+			throw new IllegalArgumentException(
+				"The selected layout cell is not a priority slot"
+			);
+		}
+
+		List<Integer> updatedLayoutItems =
+			new ArrayList<>(layoutItems);
+
+		updatedLayoutItems.set(
+			layoutIndex,
+			EMPTY_LAYOUT_ITEM
+		);
+
+		List<BankTagSlotBinding> remainingSlots =
+			new ArrayList<>(binding.getSlots());
+
+		remainingSlots.remove(removedSlot);
+
+		List<BankTagBinding> bindings =
+			new ArrayList<>(state.getBindings());
+
+		int bindingIndex = bindings.indexOf(binding);
+
+		if (remainingSlots.isEmpty())
+		{
+			bindings.remove(bindingIndex);
+		}
+		else
+		{
+			bindings.set(
+				bindingIndex,
+				binding.withSlots(remainingSlots)
+			);
+		}
+
+		PriorityState updatedState = new PriorityState(
+			state.getDefinitions(),
+			state.getGroups(),
+			bindings,
+			state.getRootEntries()
+		);
+
+		return new RemovalResult(
+			updatedState,
+			updatedLayoutItems,
+			binding.getId(),
+			removedSlot.getPlacement().getCellId(),
+			removedSlot.getPlacement().getDefinitionId(),
+			layoutIndex
+		);
+	}
+
+	private static BankTagSlotBinding slotAtIndex(
+		BankTagBinding binding,
+		int layoutIndex)
+	{
+		for (BankTagSlotBinding slot : binding.getSlots())
+		{
+			if (slot.getPlacement().getIndex() == layoutIndex)
+			{
+				return slot;
+			}
+		}
+
+		return null;
+	}
+
 	private String nextId()
 	{
 		return requireNonBlank(
@@ -654,6 +789,75 @@ public final class PrioritySlotAuthoringService
 		public int getSeededExactItemId()
 		{
 			return seededExactItemId;
+		}
+	}
+
+
+	public static final class RemovalResult
+	{
+		private final PriorityState state;
+		private final List<Integer> layoutItems;
+		private final String bindingId;
+		private final String cellId;
+		private final String definitionId;
+		private final int layoutIndex;
+
+		private RemovalResult(
+			PriorityState state,
+			List<Integer> layoutItems,
+			String bindingId,
+			String cellId,
+			String definitionId,
+			int layoutIndex)
+		{
+			this.state = Objects.requireNonNull(
+				state,
+				"state"
+			);
+			this.layoutItems = List.copyOf(layoutItems);
+			this.bindingId = requireNonBlank(
+				bindingId,
+				"bindingId"
+			);
+			this.cellId = requireNonBlank(
+				cellId,
+				"cellId"
+			);
+			this.definitionId = requireNonBlank(
+				definitionId,
+				"definitionId"
+			);
+			this.layoutIndex = layoutIndex;
+		}
+
+		public PriorityState getState()
+		{
+			return state;
+		}
+
+		public List<Integer> getLayoutItems()
+		{
+			return layoutItems;
+		}
+
+		public String getBindingId()
+		{
+			return bindingId;
+		}
+
+		public String getCellId()
+		{
+			return cellId;
+		}
+
+		public String getDefinitionId()
+		{
+			return definitionId;
+		}
+
+		public int getLayoutIndex()
+		{
+			return layoutIndex;
 		}
 	}
 
