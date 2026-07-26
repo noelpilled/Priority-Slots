@@ -279,7 +279,8 @@ public class PrioritySlotsPlugin extends Plugin
 
 		String cellId = installedCellId.get();
 
-		MenuEntry[] entries = client.getMenuEntries();
+		MenuEntry[] entries =
+				client.getMenu().getMenuEntries();
 
 		for (int index = entries.length - 1;
 			 index >= 0;
