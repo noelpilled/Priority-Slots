@@ -8,7 +8,7 @@ final class PriorityBankTag implements BankTag
 {
 	private volatile Set<Integer> itemIds = Set.of();
 
-	public void replaceItems(Set<Integer> itemIds)
+	public boolean replaceItems(Set<Integer> itemIds)
 	{
 		Objects.requireNonNull(itemIds, "itemIds");
 
@@ -17,13 +17,21 @@ final class PriorityBankTag implements BankTag
 			if (itemId == null || itemId <= 0)
 			{
 				throw new IllegalArgumentException(
-						"itemIds must contain only "
-								+ "positive item IDs"
+					"itemIds must contain only "
+						+ "positive item IDs"
 				);
 			}
 		}
 
-		this.itemIds = Set.copyOf(itemIds);
+		Set<Integer> replacement = Set.copyOf(itemIds);
+
+		if (replacement.equals(this.itemIds))
+		{
+			return false;
+		}
+
+		this.itemIds = replacement;
+		return true;
 	}
 
 	@Override

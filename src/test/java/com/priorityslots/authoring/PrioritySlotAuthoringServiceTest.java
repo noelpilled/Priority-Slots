@@ -421,6 +421,14 @@ public class PrioritySlotAuthoringServiceTest
 
 		PrioritySlotAuthoringService service = serviceWithIds();
 
+		assertEquals(
+			"cell-herbs",
+			service.installedCellIdAt(
+				state,
+				" herbs ",
+				1
+			).orElse(null)
+		);
 		assertTrue(service.isInstalledSlot(
 			state,
 			" herbs ",
@@ -466,7 +474,7 @@ public class PrioritySlotAuthoringServiceTest
 				state,
 				"herbs",
 				List.of(UNRELATED, LANTADYME, EMPTY),
-				1
+				"cell-herbs"
 			);
 
 		assertEquals(
@@ -477,6 +485,7 @@ public class PrioritySlotAuthoringServiceTest
 		assertEquals(definition.getId(), result.getDefinitionId());
 		assertEquals("cell-herbs", result.getCellId());
 		assertEquals(1, result.getLayoutIndex());
+		assertTrue(result.isLayoutItemCleared());
 		assertSame(
 			definition,
 			result.getState().definitionsById().get(
@@ -530,7 +539,7 @@ public class PrioritySlotAuthoringServiceTest
 				state,
 				"Herbs",
 				List.of(LANTADYME, EMPTY, UNRELATED),
-				0
+				"cell-herbs"
 			);
 
 		assertEquals(
@@ -545,6 +554,47 @@ public class PrioritySlotAuthoringServiceTest
 	}
 
 	@Test
+	public void detachesConflictedSlotWithoutClearingManualReplacement()
+	{
+		PriorityDefinition definition = herbsDefinition();
+		BankTagSlotBinding slot = BankTagSlotBinding.create(
+			new CellPlacement(
+				"cell-herbs",
+				definition.getId(),
+				0
+			),
+			LANTADYME
+		);
+		BankTagBinding binding = new BankTagBinding(
+			"binding-herbs",
+			"Herbs",
+			List.of(slot)
+		);
+		PriorityState state = new PriorityState(
+			List.of(definition),
+			List.of(),
+			List.of(binding),
+			List.of(
+				PriorityLibraryEntry.definition(
+					definition.getId()
+				)
+			)
+		);
+
+		PrioritySlotAuthoringService.RemovalResult result =
+			serviceWithIds().removeInstalledSlotFromActiveLayout(
+				state,
+				"Herbs",
+				List.of(UNRELATED),
+				"cell-herbs"
+			);
+
+		assertEquals(List.of(UNRELATED), result.getLayoutItems());
+		assertFalse(result.isLayoutItemCleared());
+		assertTrue(result.getState().getBindings().isEmpty());
+	}
+
+	@Test
 	public void rejectsRemovingUnmanagedLayoutCell()
 	{
 		PriorityDefinition definition = herbsDefinition();
@@ -554,7 +604,7 @@ public class PrioritySlotAuthoringServiceTest
 				stateWithDefinition(definition),
 				"Herbs",
 				List.of(LANTADYME),
-				0
+				"missing-cell"
 			)
 		);
 	}

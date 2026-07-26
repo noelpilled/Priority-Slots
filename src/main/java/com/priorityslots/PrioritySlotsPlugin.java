@@ -137,6 +137,7 @@ public class PrioritySlotsPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		bankTagProjector.activate();
 		configureSidebar();
 		reloadPriorityState();
 
@@ -156,7 +157,7 @@ public class PrioritySlotsPlugin extends Plugin
 	{
 		if (bankTagProjector != null)
 		{
-			bankTagProjector.unregisterAll();
+			bankTagProjector.deactivate();
 		}
 
 		removeSidebar();
@@ -172,7 +173,12 @@ public class PrioritySlotsPlugin extends Plugin
 	public void onProfileChanged(
 			ProfileChanged profileChanged)
 	{
-		bankTagProjector.unregisterAll();
+		clientThread.invokeLater(this::reloadForProfileChange);
+	}
+
+	private void reloadForProfileChange()
+	{
+		bankTagProjector.resetRuntimeState();
 
 		priorityState = PriorityState.empty();
 		bankSnapshot = BankSnapshot.empty();
@@ -259,13 +265,19 @@ public class PrioritySlotsPlugin extends Plugin
 
 		int layoutIndex = event.getActionParam0();
 
-		if (!authoringService.isInstalledSlot(
+		Optional<String> installedCellId =
+			authoringService.installedCellIdAt(
 				priorityState,
 				activeTag,
-				layoutIndex))
+				layoutIndex
+			);
+
+		if (!installedCellId.isPresent())
 		{
 			return;
 		}
+
+		String cellId = installedCellId.get();
 
 		MenuEntry[] entries = client.getMenuEntries();
 
@@ -292,7 +304,7 @@ public class PrioritySlotsPlugin extends Plugin
 					clientThread.invokeLater(() ->
 							removePrioritySlotFromActiveLayout(
 									activeTag,
-									layoutIndex
+									cellId
 							)
 					)
 			);
@@ -532,13 +544,11 @@ public class PrioritySlotsPlugin extends Plugin
 									definitionId
 							);
 
-			applyLayoutItems(
+			applyLayoutAndAuthoringState(
 					activeLayout,
-					result.getLayoutItems()
+					result.getLayoutItems(),
+					result.getState()
 			);
-			layoutManager.saveLayout(activeLayout);
-
-			applyAuthoringState(result.getState());
 
 			if (!bankSnapshotKnown)
 			{
@@ -566,7 +576,7 @@ public class PrioritySlotsPlugin extends Plugin
 
 	private void removePrioritySlotFromActiveLayout(
 			String expectedBankTagName,
-			int layoutIndex)
+			String cellId)
 	{
 		try
 		{
@@ -586,13 +596,16 @@ public class PrioritySlotsPlugin extends Plugin
 				);
 			}
 
-			PrioritySlotAuthoringService.RemovalResult
-					result = authoringService
+			priorityState = bankTagProjector
+					.reconcileActiveLayout(priorityState);
+
+			PrioritySlotAuthoringService.RemovalResult result =
+					authoringService
 							.removeInstalledSlotFromActiveLayout(
 									priorityState,
 									activeTag,
 									layoutItems(activeLayout),
-									layoutIndex
+									cellId
 							);
 
 			PriorityDefinition definition =
@@ -600,13 +613,11 @@ public class PrioritySlotsPlugin extends Plugin
 							result.getDefinitionId()
 					);
 
-			applyLayoutItems(
+			applyLayoutAndAuthoringState(
 					activeLayout,
-					result.getLayoutItems()
+					result.getLayoutItems(),
+					result.getState()
 			);
-			layoutManager.saveLayout(activeLayout);
-
-			applyAuthoringState(result.getState());
 
 			bankTagsService.openBankTag(
 					activeTag,
@@ -621,7 +632,9 @@ public class PrioritySlotsPlugin extends Plugin
 									: definition.getName())
 							+ " from "
 							+ activeTag
-							+ ".",
+							+ (result.isLayoutItemCleared()
+									? "."
+									: "; current layout item preserved."),
 					false
 			);
 		}
@@ -631,6 +644,69 @@ public class PrioritySlotsPlugin extends Plugin
 					"Unable to remove priority slot",
 					exception
 			);
+		}
+	}
+
+	private void applyLayoutAndAuthoringState(
+			Layout layout,
+			List<Integer> updatedLayoutItems,
+			PriorityState updatedState)
+	{
+		List<Integer> previousLayoutItems = layoutItems(layout);
+		PriorityState previousState = priorityState;
+
+		try
+		{
+			applyLayoutItems(layout, updatedLayoutItems);
+			layoutManager.saveLayout(layout);
+			applyAuthoringState(updatedState);
+		}
+		catch (RuntimeException exception)
+		{
+			rollbackLayoutAndState(
+					layout,
+					previousLayoutItems,
+					previousState,
+					exception
+			);
+			throw exception;
+		}
+	}
+
+	private void rollbackLayoutAndState(
+			Layout layout,
+			List<Integer> previousLayoutItems,
+			PriorityState previousState,
+			RuntimeException originalException)
+	{
+		try
+		{
+			applyLayoutItems(layout, previousLayoutItems);
+			layoutManager.saveLayout(layout);
+		}
+		catch (RuntimeException rollbackException)
+		{
+			originalException.addSuppressed(rollbackException);
+		}
+
+		try
+		{
+			priorityStateStore.save(previousState);
+			priorityState = previousState;
+
+			if (bankSnapshotKnown)
+			{
+				priorityState = bankTagProjector.synchronize(
+						priorityState,
+						bankSnapshot
+				);
+			}
+
+			prioritySlotsPanel.setState(priorityState);
+		}
+		catch (RuntimeException rollbackException)
+		{
+			originalException.addSuppressed(rollbackException);
 		}
 	}
 
@@ -868,7 +944,7 @@ public class PrioritySlotsPlugin extends Plugin
 							List.of(binding)
 					);
 
-			bankTagProjector.unregisterAll();
+			bankTagProjector.resetRuntimeState();
 
 			priorityStateStore.save(newState);
 			priorityState = newState;

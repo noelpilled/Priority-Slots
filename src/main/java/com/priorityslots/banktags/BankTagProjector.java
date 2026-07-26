@@ -3,9 +3,7 @@ package com.priorityslots.banktags;
 import com.priorityslots.domain.BankSnapshot;
 import com.priorityslots.domain.BankTagBinding;
 import com.priorityslots.domain.BankTagSlotBinding;
-import com.priorityslots.domain.PriorityResolver;
 import com.priorityslots.domain.PriorityState;
-import com.priorityslots.domain.SlotResolution;
 import com.priorityslots.persistence.PriorityStateStore;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,6 +13,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -37,18 +37,30 @@ public final class BankTagProjector
 	private final PriorityStateStore stateStore;
 	private final ClientThread clientThread;
 
-	private final PriorityResolver resolver =
-		new PriorityResolver();
-
 	private final BankTagPlacementReconciler
 		placementReconciler =
 		new BankTagPlacementReconciler();
 
+	private final BankTagProjectionPlanner projectionPlanner =
+		new BankTagProjectionPlanner();
+
+	/*
+	 * registeredTags and cleanupTracker are client-thread confined.
+	 * Lifecycle methods only touch the atomics before scheduling work.
+	 */
 	private final Map<String, PriorityBankTag>
 		registeredTags = new HashMap<>();
 
 	private final DeferredCleanupTracker cleanupTracker =
 		new DeferredCleanupTracker();
+
+	private final AtomicBoolean active =
+		new AtomicBoolean();
+
+	private final AtomicLong lifecycleGeneration =
+		new AtomicLong();
+
+	private long appliedGeneration = -1L;
 
 	@Inject
 	public BankTagProjector(
@@ -90,16 +102,61 @@ public final class BankTagProjector
 		);
 	}
 
+	public void activate()
+	{
+		active.set(true);
+		long generation = lifecycleGeneration.incrementAndGet();
+
+		clientThread.invokeLater(() ->
+		{
+			if (active.get()
+				&& lifecycleGeneration.get() == generation)
+			{
+				ensureRuntimeGeneration();
+			}
+		});
+	}
+
+	public void deactivate()
+	{
+		active.set(false);
+		long generation = lifecycleGeneration.incrementAndGet();
+
+		clientThread.invokeLater(() ->
+		{
+			if (!active.get()
+				&& lifecycleGeneration.get() == generation)
+			{
+				clearRuntimeState();
+				appliedGeneration = generation;
+			}
+		});
+	}
+
+	/**
+	 * Clears profile-scoped runtime state. The caller must dispatch this
+	 * method through ClientThread.
+	 */
+	public void resetRuntimeState()
+	{
+		long generation = lifecycleGeneration.incrementAndGet();
+		clearRuntimeState();
+		appliedGeneration = generation;
+	}
+
 	public PriorityState synchronize(
 		PriorityState state,
 		BankSnapshot bankSnapshot)
 	{
 		Objects.requireNonNull(state, "state");
+		Objects.requireNonNull(bankSnapshot, "bankSnapshot");
 
-		Objects.requireNonNull(
-			bankSnapshot,
-			"bankSnapshot"
-		);
+		if (!active.get())
+		{
+			return state;
+		}
+
+		ensureRuntimeGeneration();
 
 		List<ProjectionPlan> projectionPlans =
 			new ArrayList<>();
@@ -112,8 +169,7 @@ public final class BankTagProjector
 
 		boolean stateChanged = false;
 
-		for (BankTagBinding binding
-			: state.getBindings())
+		for (BankTagBinding binding : state.getBindings())
 		{
 			Layout layout = coreLayoutFor(
 				binding.getBankTagName()
@@ -123,16 +179,12 @@ public final class BankTagProjector
 			{
 				reconciledBindings.add(binding);
 				projectionPlans.add(
-					ProjectionPlan.safe(
-						binding,
-						null
-					)
+					ProjectionPlan.safe(binding, null)
 				);
 				continue;
 			}
 
-			BankTagPlacementReconciler.Result
-				reconciliation =
+			BankTagPlacementReconciler.Result reconciliation =
 				placementReconciler.reconcile(
 					binding,
 					layout::getItemAtPos,
@@ -142,12 +194,8 @@ public final class BankTagProjector
 			BankTagBinding reconciledBinding =
 				reconciliation.getBinding();
 
-			reconciledBindings.add(
-				reconciledBinding
-			);
-
-			stateChanged |=
-				reconciledBinding != binding;
+			reconciledBindings.add(reconciledBinding);
+			stateChanged |= reconciledBinding != binding;
 
 			if (reconciledBinding != binding)
 			{
@@ -157,7 +205,6 @@ public final class BankTagProjector
 			if (!reconciliation.isProjectionSafe())
 			{
 				unsafeBindingIds.add(binding.getId());
-
 				projectionPlans.add(
 					ProjectionPlan.unsafe(
 						reconciledBinding,
@@ -170,7 +217,6 @@ public final class BankTagProjector
 						+ "reconciled safely before projection",
 					binding.getId()
 				);
-
 				continue;
 			}
 
@@ -182,24 +228,20 @@ public final class BankTagProjector
 			);
 		}
 
-		PriorityState reconciledState =
-			stateChanged
-				? state.withBindings(
-					reconciledBindings
-				)
-				: state;
+		PriorityState reconciledState = stateChanged
+			? state.withBindings(reconciledBindings)
+			: state;
 
 		refreshCleanupState(
 			reconciledState,
 			unsafeBindingIds
 		);
 
-		removeUnusedRuntimeState(reconciledState);
+		boolean activeRefreshRequired =
+			removeUnusedRuntimeState(reconciledState);
 
 		List<BankTagBinding> updatedBindings =
 			new ArrayList<>();
-
-		boolean activeRefreshRequired = false;
 
 		for (ProjectionPlan plan : projectionPlans)
 		{
@@ -217,19 +259,13 @@ public final class BankTagProjector
 			);
 
 			updatedBindings.add(result.binding);
-
 			stateChanged |= result.stateChanged;
-
-			activeRefreshRequired |=
-				result.activeRefreshRequired;
+			activeRefreshRequired |= result.activeRefreshRequired;
 		}
 
-		PriorityState updatedState =
-			stateChanged
-				? reconciledState.withBindings(
-					updatedBindings
-				)
-				: reconciledState;
+		PriorityState updatedState = stateChanged
+			? reconciledState.withBindings(updatedBindings)
+			: reconciledState;
 
 		if (stateChanged)
 		{
@@ -249,14 +285,17 @@ public final class BankTagProjector
 	{
 		Objects.requireNonNull(state, "state");
 
-		String activeTag =
-			bankTagsService.getActiveTag();
+		if (!active.get())
+		{
+			return state;
+		}
 
-		Layout activeLayout =
-			bankTagsService.getActiveLayout();
+		ensureRuntimeGeneration();
 
-		if (activeTag == null
-			|| activeLayout == null)
+		String activeTag = bankTagsService.getActiveTag();
+		Layout activeLayout = bankTagsService.getActiveLayout();
+
+		if (activeTag == null || activeLayout == null)
 		{
 			return state;
 		}
@@ -269,19 +308,15 @@ public final class BankTagProjector
 
 		boolean stateChanged = false;
 
-		for (BankTagBinding binding
-			: state.getBindings())
+		for (BankTagBinding binding : state.getBindings())
 		{
-			if (!sameTag(
-				binding.getBankTagName(),
-				activeTag))
+			if (!sameTag(binding.getBankTagName(), activeTag))
 			{
 				updatedBindings.add(binding);
 				continue;
 			}
 
-			BankTagPlacementReconciler.Result
-				reconciliation =
+			BankTagPlacementReconciler.Result reconciliation =
 				placementReconciler.reconcile(
 					binding,
 					activeLayout::getItemAtPos,
@@ -298,8 +333,7 @@ public final class BankTagProjector
 				unsafeBindingIds.add(binding.getId());
 			}
 
-			stateChanged |=
-				updatedBinding != binding;
+			stateChanged |= updatedBinding != binding;
 
 			if (updatedBinding != binding)
 			{
@@ -307,10 +341,9 @@ public final class BankTagProjector
 			}
 		}
 
-		PriorityState updatedState =
-			stateChanged
-				? state.withBindings(updatedBindings)
-				: state;
+		PriorityState updatedState = stateChanged
+			? state.withBindings(updatedBindings)
+			: state;
 
 		refreshCleanupState(
 			updatedState,
@@ -323,19 +356,6 @@ public final class BankTagProjector
 		}
 
 		return updatedState;
-	}
-
-	public void unregisterAll()
-	{
-		for (String bankTagName
-			: registeredTags.keySet())
-		{
-			tagManager.unregisterTag(bankTagName);
-		}
-
-		registeredTags.clear();
-
-		cleanupTracker.reset();
 	}
 
 	private ProjectionResult projectBinding(
@@ -351,198 +371,89 @@ public final class BankTagProjector
 				binding.getBankTagName()
 			);
 
-			updateDynamicTag(
+			boolean dynamicTagChanged = updateDynamicTag(
 				binding.getBankTagName(),
 				Set.of()
 			);
 
-			return ProjectionResult.unchanged(
-				binding
+			return new ProjectionResult(
+				binding,
+				false,
+				dynamicTagChanged
+					&& isActiveTag(binding.getBankTagName())
 			);
 		}
 
-		List<SlotResolution> resolutions =
-			resolver.resolveBinding(
-				binding,
-				state.definitionsById(),
-				bankSnapshot
-			);
-
-		Map<String, SlotResolution>
-			resolutionsByCellId =
-				new HashMap<>();
-
-		for (SlotResolution resolution
-			: resolutions)
-		{
-			resolutionsByCellId.put(
-				resolution.getCellId(),
-				resolution
-			);
-		}
-
-		Set<Integer> managedItemIds =
-			BankTagManagedItems.collect(
-				binding,
-				state
-			);
+		BankTagProjectionPlanner.Plan plan = projectionPlanner.plan(
+			binding,
+			state,
+			bankSnapshot,
+			layoutItems(coreLayout)
+		);
 
 		scheduleOrdinaryMembershipCleanup(
 			binding,
-			managedItemIds
+			plan.getManagedItemIds()
 		);
 
-		boolean layoutChanged =
-			scrubManagedItemsOutsideSlots(
+		logProjectionDiagnostics(binding, plan);
+
+		if (plan.isLayoutChanged())
+		{
+			applyLayoutItems(
 				coreLayout,
-				binding,
-				managedItemIds
+				plan.getProjectedLayoutItems()
 			);
-
-		boolean bindingChanged = false;
-
-		List<BankTagSlotBinding> updatedSlots =
-			new ArrayList<>();
-
-		Set<Integer> dynamicItemIds =
-			new HashSet<>();
-
-		for (BankTagSlotBinding slot
-			: binding.getSlots())
-		{
-			int index =
-				slot.getPlacement().getIndex();
-
-			if (index >= coreLayout.size())
-			{
-				log.debug(
-					"Priority slot {} is outside "
-						+ "Bank Tags layout '{}'",
-					slot.getPlacement().getCellId(),
-					binding.getBankTagName()
-				);
-
-				updatedSlots.add(slot);
-
-				continue;
-			}
-
-			int currentItemId =
-				coreLayout.getItemAtPos(index);
-
-			SlotResolution resolution =
-				resolutionsByCellId.get(
-					slot.getPlacement().getCellId()
-				);
-
-			if (resolution == null
-				|| resolution.getState()
-					== SlotResolution.State.UNRESOLVED)
-			{
-				if (currentItemId > 0)
-				{
-					dynamicItemIds.add(
-						currentItemId
-					);
-				}
-
-				updatedSlots.add(slot);
-
-				continue;
-			}
-
-			if (!slot.matchesLayoutItem(
-				currentItemId))
-			{
-				if (currentItemId > 0)
-				{
-					dynamicItemIds.add(
-						currentItemId
-					);
-				}
-
-				log.debug(
-					"Priority slot {} was changed "
-						+ "outside Priority Slots; "
-						+ "expected {}, found {}",
-					slot.getPlacement().getCellId(),
-					slot.getLastProjectedExactItemId(),
-					currentItemId
-				);
-
-				updatedSlots.add(slot);
-
-				continue;
-			}
-
-			int resolvedItemId =
-				resolution.getExactItemId();
-
-			if (resolution.isOwned())
-			{
-				dynamicItemIds.add(
-					resolvedItemId
-				);
-			}
-
-			if (currentItemId != resolvedItemId)
-			{
-				coreLayout.setItemAtPos(
-					resolvedItemId,
-					index
-				);
-
-				layoutChanged = true;
-			}
-
-			if (slot.getLastProjectedExactItemId()
-				!= resolvedItemId)
-			{
-				updatedSlots.add(
-					slot.withLastProjectedExactItemId(
-						resolvedItemId
-					)
-				);
-
-				bindingChanged = true;
-			}
-			else
-			{
-				updatedSlots.add(slot);
-			}
-		}
-
-		updateDynamicTag(
-			binding.getBankTagName(),
-			dynamicItemIds
-		);
-
-		if (layoutChanged)
-		{
 			layoutManager.saveLayout(coreLayout);
 		}
 
-		BankTagBinding updatedBinding =
-			bindingChanged
-				? binding.withSlots(updatedSlots)
-				: binding;
+		boolean dynamicTagChanged = updateDynamicTag(
+			binding.getBankTagName(),
+			plan.getDynamicItemIds()
+		);
 
 		return new ProjectionResult(
-			updatedBinding,
-			bindingChanged,
-			isActiveTag(
-				binding.getBankTagName()
-			)
+			plan.getBinding(),
+			plan.isBindingChanged(),
+			isActiveTag(binding.getBankTagName())
+				&& (plan.isLayoutChanged() || dynamicTagChanged)
 		);
 	}
 
-	private Layout coreLayoutFor(
-		String bankTagName)
+	private static void logProjectionDiagnostics(
+		BankTagBinding binding,
+		BankTagProjectionPlanner.Plan plan)
+	{
+		for (String cellId : plan.getOutsideLayoutCellIds())
+		{
+			log.debug(
+				"Priority slot {} is outside Bank Tags layout '{}'",
+				cellId,
+				binding.getBankTagName()
+			);
+		}
+
+		for (Map.Entry<String, BankTagProjectionPlanner.Conflict>
+			entry : plan.getConflictsByCellId().entrySet())
+		{
+			BankTagProjectionPlanner.Conflict conflict =
+				entry.getValue();
+
+			log.debug(
+				"Priority slot {} was changed outside Priority Slots; "
+					+ "expected {}, found {}",
+				entry.getKey(),
+				conflict.getExpectedItemId(),
+				conflict.getCurrentItemId()
+			);
+		}
+	}
+
+	private Layout coreLayoutFor(String bankTagName)
 	{
 		if (isActiveTag(bankTagName))
 		{
-			Layout activeLayout =
-				bankTagsService.getActiveLayout();
+			Layout activeLayout = bankTagsService.getActiveLayout();
 
 			if (activeLayout != null)
 			{
@@ -550,12 +461,10 @@ public final class BankTagProjector
 			}
 		}
 
-		return layoutManager.loadLayout(
-			bankTagName
-		);
+		return layoutManager.loadLayout(bankTagName);
 	}
 
-	private void updateDynamicTag(
+	private boolean updateDynamicTag(
 		String bankTagName,
 		Set<Integer> itemIds)
 	{
@@ -563,27 +472,22 @@ public final class BankTagProjector
 			Text.standardize(bankTagName);
 
 		PriorityBankTag priorityBankTag =
-			registeredTags.get(
-				standardizedTagName
-			);
+			registeredTags.get(standardizedTagName);
+
+		boolean registered = false;
 
 		if (priorityBankTag == null)
 		{
-			priorityBankTag =
-				new PriorityBankTag();
-
-			registeredTags.put(
-				standardizedTagName,
-				priorityBankTag
-			);
-
+			priorityBankTag = new PriorityBankTag();
+			registeredTags.put(standardizedTagName, priorityBankTag);
 			tagManager.registerTag(
 				standardizedTagName,
 				priorityBankTag
 			);
+			registered = true;
 		}
 
-		priorityBankTag.replaceItems(itemIds);
+		return priorityBankTag.replaceItems(itemIds) || registered;
 	}
 
 	private void scheduleOrdinaryMembershipCleanup(
@@ -591,10 +495,7 @@ public final class BankTagProjector
 		Set<Integer> managedItemIds)
 	{
 		DeferredCleanupTracker.Signature signature =
-			cleanupSignature(
-				binding,
-				managedItemIds
-			);
+			cleanupSignature(binding, managedItemIds);
 
 		Optional<DeferredCleanupTracker.Token> token =
 			cleanupTracker.begin(signature);
@@ -607,13 +508,22 @@ public final class BankTagProjector
 		Set<Integer> immutableItemIds =
 			signature.getManagedItemIds();
 
+		long generation = lifecycleGeneration.get();
+
 		clientThread.invokeLater(() ->
+		{
+			if (!active.get()
+				|| lifecycleGeneration.get() != generation)
+			{
+				return;
+			}
+
 			executeOrdinaryMembershipCleanup(
 				binding,
 				immutableItemIds,
 				token.get()
-			)
-		);
+			);
+		});
 	}
 
 	private void executeOrdinaryMembershipCleanup(
@@ -621,50 +531,45 @@ public final class BankTagProjector
 		Set<Integer> managedItemIds,
 		DeferredCleanupTracker.Token token)
 	{
-		if (!cleanupTracker.isCurrent(token))
+		if (!active.get() || !cleanupTracker.isCurrent(token))
 		{
 			return;
 		}
 
 		try
 		{
-			String bankTagName =
-				binding.getBankTagName();
+			String bankTagName = binding.getBankTagName();
 
 			for (Integer itemId : managedItemIds)
 			{
-				tagManager.removeTag(
-					itemId,
-					bankTagName
-				);
+				tagManager.removeTag(itemId, bankTagName);
 			}
 
-			Layout layout =
-				coreLayoutFor(bankTagName);
+			Layout layout = coreLayoutFor(bankTagName);
 
-			if (layout != null
-				&& scrubManagedItemsOutsideSlots(
-					layout,
-					binding,
-					managedItemIds
-				))
+			if (layout != null)
 			{
-				layoutManager.saveLayout(layout);
+				List<Integer> layoutItems = layoutItems(layout);
+				List<Integer> scrubbedItems = projectionPlanner
+					.scrubManagedItemsOutsideSlots(
+						layoutItems,
+						binding,
+						managedItemIds
+					);
+
+				if (!layoutItems.equals(scrubbedItems))
+				{
+					applyLayoutItems(layout, scrubbedItems);
+					layoutManager.saveLayout(layout);
+				}
 			}
 
 			if (isActiveTag(bankTagName))
 			{
-				/*
-				 * Reopen the tab so Bank Tags captures
-				 * the custom PriorityBankTag that was
-				 * registered by projectBinding().
-				 */
 				bankTagsService.openBankTag(
 					bankTagName,
-					BankTagsService
-						.OPTION_ALLOW_MODIFICATIONS
+					BankTagsService.OPTION_ALLOW_MODIFICATIONS
 				);
-
 				bankSearch.layoutBank();
 			}
 
@@ -673,10 +578,8 @@ public final class BankTagProjector
 		catch (RuntimeException exception)
 		{
 			cleanupTracker.fail(token);
-
 			log.warn(
-				"Unable to clean ordinary Bank Tags "
-					+ "membership for '{}'",
+				"Unable to clean ordinary Bank Tags membership for '{}'",
 				binding.getBankTagName(),
 				exception
 			);
@@ -696,11 +599,9 @@ public final class BankTagProjector
 		List<DeferredCleanupTracker.Signature> signatures =
 			new ArrayList<>();
 
-		for (BankTagBinding binding
-			: state.getBindings())
+		for (BankTagBinding binding : state.getBindings())
 		{
-			if (excludedBindingIds.contains(
-				binding.getId()))
+			if (excludedBindingIds.contains(binding.getId()))
 			{
 				continue;
 			}
@@ -708,15 +609,121 @@ public final class BankTagProjector
 			signatures.add(
 				cleanupSignature(
 					binding,
-					BankTagManagedItems.collect(
-						binding,
-						state
-					)
+					BankTagManagedItems.collect(binding, state)
 				)
 			);
 		}
 
 		cleanupTracker.replaceCurrent(signatures);
+	}
+
+	private static DeferredCleanupTracker.Signature cleanupSignature(
+		BankTagBinding binding,
+		Set<Integer> managedItemIds)
+	{
+		return new DeferredCleanupTracker.Signature(
+			binding.getId(),
+			Text.standardize(binding.getBankTagName()),
+			managedItemIds,
+			BankTagManagedItems.reservedIndices(binding)
+		);
+	}
+
+	private boolean removeUnusedRuntimeState(PriorityState state)
+	{
+		Set<String> requiredTagNames = new HashSet<>();
+
+		for (BankTagBinding binding : state.getBindings())
+		{
+			requiredTagNames.add(
+				Text.standardize(binding.getBankTagName())
+			);
+		}
+
+		List<String> obsoleteTagNames = new ArrayList<>();
+
+		for (String registeredTagName : registeredTags.keySet())
+		{
+			if (!requiredTagNames.contains(registeredTagName))
+			{
+				obsoleteTagNames.add(registeredTagName);
+			}
+		}
+
+		boolean activeTagChanged = false;
+
+		for (String obsoleteTagName : obsoleteTagNames)
+		{
+			activeTagChanged |= isActiveTag(obsoleteTagName);
+			tagManager.unregisterTag(obsoleteTagName);
+			registeredTags.remove(obsoleteTagName);
+		}
+
+		return activeTagChanged;
+	}
+
+	private void ensureRuntimeGeneration()
+	{
+		long generation = lifecycleGeneration.get();
+
+		if (appliedGeneration == generation)
+		{
+			return;
+		}
+
+		clearRuntimeState();
+		appliedGeneration = generation;
+	}
+
+	private void clearRuntimeState()
+	{
+		for (String bankTagName
+			: new ArrayList<>(registeredTags.keySet()))
+		{
+			tagManager.unregisterTag(bankTagName);
+		}
+
+		registeredTags.clear();
+		cleanupTracker.reset();
+	}
+
+	private boolean isActiveTag(String bankTagName)
+	{
+		String activeTag = bankTagsService.getActiveTag();
+
+		return activeTag != null && sameTag(activeTag, bankTagName);
+	}
+
+	private static boolean sameTag(String first, String second)
+	{
+		return Text.standardize(first).equals(
+			Text.standardize(second)
+		);
+	}
+
+	private static List<Integer> layoutItems(Layout layout)
+	{
+		int[] values = layout.getLayout();
+		List<Integer> result = new ArrayList<>(values.length);
+
+		for (int value : values)
+		{
+			result.add(value);
+		}
+
+		return List.copyOf(result);
+	}
+
+	private static void applyLayoutItems(
+		Layout layout,
+		List<Integer> itemIds)
+	{
+		layout.resize(itemIds.size());
+
+		for (int index = 0; index < itemIds.size(); index++)
+		{
+			layout.setItemAtPos(itemIds.get(index), index);
+		}
 	}
 
 	private static void logMovedSlots(
@@ -736,14 +743,13 @@ public final class BankTagProjector
 
 		for (BankTagSlotBinding slot : updated.getSlots())
 		{
-			BankTagSlotBinding oldSlot =
-				previousByCellId.get(
-					slot.getPlacement().getCellId()
-				);
+			BankTagSlotBinding oldSlot = previousByCellId.get(
+				slot.getPlacement().getCellId()
+			);
 
 			if (oldSlot == null
 				|| oldSlot.getPlacement().getIndex()
-				== slot.getPlacement().getIndex())
+					== slot.getPlacement().getIndex())
 			{
 				continue;
 			}
@@ -759,129 +765,6 @@ public final class BankTagProjector
 		}
 	}
 
-	private static DeferredCleanupTracker.Signature
-	cleanupSignature(
-		BankTagBinding binding,
-		Set<Integer> managedItemIds)
-	{
-		return new DeferredCleanupTracker.Signature(
-			binding.getId(),
-			Text.standardize(
-				binding.getBankTagName()
-			),
-			managedItemIds,
-			BankTagManagedItems.reservedIndices(
-				binding
-			)
-		);
-	}
-
-	private static boolean
-	scrubManagedItemsOutsideSlots(
-		Layout layout,
-		BankTagBinding binding,
-		Set<Integer> managedItemIds)
-	{
-		Set<Integer> reservedIndices =
-			new HashSet<>();
-
-		for (BankTagSlotBinding slot
-			: binding.getSlots())
-		{
-			reservedIndices.add(
-				slot.getPlacement().getIndex()
-			);
-		}
-
-		boolean changed = false;
-
-		for (int index = 0;
-		     index < layout.size();
-		     index++)
-		{
-			int itemId =
-				layout.getItemAtPos(index);
-
-			if (itemId > 0
-				&& !reservedIndices.contains(index)
-				&& managedItemIds.contains(itemId))
-			{
-				layout.removeItemAtPos(index);
-
-				changed = true;
-			}
-		}
-
-		return changed;
-	}
-
-	private void removeUnusedRuntimeState(
-		PriorityState state)
-	{
-		Set<String> requiredTagNames =
-			new HashSet<>();
-
-		for (BankTagBinding binding
-			: state.getBindings())
-		{
-			requiredTagNames.add(
-				Text.standardize(
-					binding.getBankTagName()
-				)
-			);
-		}
-
-		List<String> obsoleteTagNames =
-			new ArrayList<>();
-
-		for (String registeredTagName
-			: registeredTags.keySet())
-		{
-			if (!requiredTagNames.contains(
-				registeredTagName))
-			{
-				obsoleteTagNames.add(
-					registeredTagName
-				);
-			}
-		}
-
-		for (String obsoleteTagName
-			: obsoleteTagNames)
-		{
-			tagManager.unregisterTag(
-				obsoleteTagName
-			);
-
-			registeredTags.remove(
-				obsoleteTagName
-			);
-		}
-	}
-
-	private boolean isActiveTag(
-		String bankTagName)
-	{
-		String activeTag =
-			bankTagsService.getActiveTag();
-
-		return activeTag != null
-			&& sameTag(
-				activeTag,
-				bankTagName
-			);
-	}
-
-	private static boolean sameTag(
-		String first,
-		String second)
-	{
-		return Text.standardize(first).equals(
-			Text.standardize(second)
-		);
-	}
-
-
 	private static final class ProjectionPlan
 	{
 		private final BankTagBinding binding;
@@ -893,10 +776,7 @@ public final class BankTagProjector
 			Layout layout,
 			boolean projectionSafe)
 		{
-			this.binding = Objects.requireNonNull(
-				binding,
-				"binding"
-			);
+			this.binding = Objects.requireNonNull(binding, "binding");
 			this.layout = layout;
 			this.projectionSafe = projectionSafe;
 		}
@@ -905,22 +785,14 @@ public final class BankTagProjector
 			BankTagBinding binding,
 			Layout layout)
 		{
-			return new ProjectionPlan(
-				binding,
-				layout,
-				true
-			);
+			return new ProjectionPlan(binding, layout, true);
 		}
 
 		private static ProjectionPlan unsafe(
 			BankTagBinding binding,
 			Layout layout)
 		{
-			return new ProjectionPlan(
-				binding,
-				layout,
-				false
-			);
+			return new ProjectionPlan(binding, layout, false);
 		}
 	}
 
@@ -935,21 +807,9 @@ public final class BankTagProjector
 			boolean stateChanged,
 			boolean activeRefreshRequired)
 		{
-			this.binding = binding;
+			this.binding = Objects.requireNonNull(binding, "binding");
 			this.stateChanged = stateChanged;
-
-			this.activeRefreshRequired =
-				activeRefreshRequired;
-		}
-
-		private static ProjectionResult unchanged(
-			BankTagBinding binding)
-		{
-			return new ProjectionResult(
-				binding,
-				false,
-				false
-			);
+			this.activeRefreshRequired = activeRefreshRequired;
 		}
 	}
 }

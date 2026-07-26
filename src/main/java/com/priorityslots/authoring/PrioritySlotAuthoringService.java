@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -419,7 +420,7 @@ public final class PrioritySlotAuthoringService
 	}
 
 
-	public boolean isInstalledSlot(
+	public Optional<String> installedCellIdAt(
 		PriorityState state,
 		String activeBankTagName,
 		int layoutIndex)
@@ -430,21 +431,44 @@ public final class PrioritySlotAuthoringService
 			|| activeBankTagName.trim().isEmpty()
 			|| layoutIndex < 0)
 		{
-			return false;
+			return Optional.empty();
 		}
 
 		BankTagBinding binding =
 			bindingForTag(state, activeBankTagName);
 
-		return binding != null
-			&& slotAtIndex(binding, layoutIndex) != null;
+		if (binding == null)
+		{
+			return Optional.empty();
+		}
+
+		BankTagSlotBinding slot =
+			slotAtIndex(binding, layoutIndex);
+
+		return slot == null
+			? Optional.empty()
+			: Optional.of(
+				slot.getPlacement().getCellId()
+			);
+	}
+
+	public boolean isInstalledSlot(
+		PriorityState state,
+		String activeBankTagName,
+		int layoutIndex)
+	{
+		return installedCellIdAt(
+			state,
+			activeBankTagName,
+			layoutIndex
+		).isPresent();
 	}
 
 	public RemovalResult removeInstalledSlotFromActiveLayout(
 		PriorityState state,
 		String activeBankTagName,
 		List<Integer> activeLayoutItems,
-		int layoutIndex)
+		String cellId)
 	{
 		Objects.requireNonNull(state, "state");
 
@@ -453,23 +477,14 @@ public final class PrioritySlotAuthoringService
 			"activeBankTagName"
 		);
 
-		if (layoutIndex < 0)
-		{
-			throw new IllegalArgumentException(
-				"layoutIndex must not be negative"
-			);
-		}
+		String requiredCellId = requireNonBlank(
+			cellId,
+			"cellId"
+		);
 
 		List<Integer> layoutItems = copyLayoutItems(
 			activeLayoutItems
 		);
-
-		if (layoutIndex >= layoutItems.size())
-		{
-			throw new IllegalArgumentException(
-				"layoutIndex is outside the active layout"
-			);
-		}
 
 		BankTagBinding binding =
 			bindingForTag(state, bankTagName);
@@ -482,22 +497,39 @@ public final class PrioritySlotAuthoringService
 		}
 
 		BankTagSlotBinding removedSlot =
-			slotAtIndex(binding, layoutIndex);
+			slotByCellId(binding, requiredCellId);
 
 		if (removedSlot == null)
 		{
 			throw new IllegalArgumentException(
-				"The selected layout cell is not a priority slot"
+				"The selected priority slot no longer exists"
+			);
+		}
+
+		int layoutIndex =
+			removedSlot.getPlacement().getIndex();
+
+		if (layoutIndex >= layoutItems.size())
+		{
+			throw new IllegalArgumentException(
+				"Priority slot is outside the active layout"
 			);
 		}
 
 		List<Integer> updatedLayoutItems =
 			new ArrayList<>(layoutItems);
 
-		updatedLayoutItems.set(
-			layoutIndex,
-			EMPTY_LAYOUT_ITEM
+		boolean layoutItemCleared = removedSlot.matchesLayoutItem(
+			updatedLayoutItems.get(layoutIndex)
 		);
+
+		if (layoutItemCleared)
+		{
+			updatedLayoutItems.set(
+				layoutIndex,
+				EMPTY_LAYOUT_ITEM
+			);
+		}
 
 		List<BankTagSlotBinding> remainingSlots =
 			new ArrayList<>(binding.getSlots());
@@ -534,7 +566,8 @@ public final class PrioritySlotAuthoringService
 			binding.getId(),
 			removedSlot.getPlacement().getCellId(),
 			removedSlot.getPlacement().getDefinitionId(),
-			layoutIndex
+			layoutIndex,
+			layoutItemCleared
 		);
 	}
 
@@ -545,6 +578,21 @@ public final class PrioritySlotAuthoringService
 		for (BankTagSlotBinding slot : binding.getSlots())
 		{
 			if (slot.getPlacement().getIndex() == layoutIndex)
+			{
+				return slot;
+			}
+		}
+
+		return null;
+	}
+
+	private static BankTagSlotBinding slotByCellId(
+		BankTagBinding binding,
+		String cellId)
+	{
+		for (BankTagSlotBinding slot : binding.getSlots())
+		{
+			if (slot.getPlacement().getCellId().equals(cellId))
 			{
 				return slot;
 			}
@@ -801,6 +849,7 @@ public final class PrioritySlotAuthoringService
 		private final String cellId;
 		private final String definitionId;
 		private final int layoutIndex;
+		private final boolean layoutItemCleared;
 
 		private RemovalResult(
 			PriorityState state,
@@ -808,7 +857,8 @@ public final class PrioritySlotAuthoringService
 			String bindingId,
 			String cellId,
 			String definitionId,
-			int layoutIndex)
+			int layoutIndex,
+			boolean layoutItemCleared)
 		{
 			this.state = Objects.requireNonNull(
 				state,
@@ -828,6 +878,7 @@ public final class PrioritySlotAuthoringService
 				"definitionId"
 			);
 			this.layoutIndex = layoutIndex;
+			this.layoutItemCleared = layoutItemCleared;
 		}
 
 		public PriorityState getState()
@@ -858,6 +909,11 @@ public final class PrioritySlotAuthoringService
 		public int getLayoutIndex()
 		{
 			return layoutIndex;
+		}
+
+		public boolean isLayoutItemCleared()
+		{
+			return layoutItemCleared;
 		}
 	}
 
