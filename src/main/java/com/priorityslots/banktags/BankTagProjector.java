@@ -4,6 +4,7 @@ import com.priorityslots.domain.BankSnapshot;
 import com.priorityslots.domain.BankTagBinding;
 import com.priorityslots.domain.BankTagSlotBinding;
 import com.priorityslots.domain.PriorityState;
+import com.priorityslots.lifecycle.LifecycleGeneration;
 import com.priorityslots.persistence.PriorityStateStore;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -13,12 +14,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.plugins.bank.BankSearch;
 import net.runelite.client.plugins.banktags.BankTagsService;
 import net.runelite.client.plugins.banktags.TagManager;
@@ -44,9 +45,13 @@ public final class BankTagProjector
 	private final BankTagProjectionPlanner projectionPlanner =
 		new BankTagProjectionPlanner();
 
+	private final LifecycleGeneration lifecycle =
+		new LifecycleGeneration();
+
 	/*
 	 * registeredTags and cleanupTracker are client-thread confined.
-	 * Lifecycle methods only touch the atomics before scheduling work.
+	 * Lifecycle methods only update the thread-safe lifecycle token before
+	 * scheduling work.
 	 */
 	private final Map<String, PriorityBankTag>
 		registeredTags = new HashMap<>();
@@ -54,11 +59,8 @@ public final class BankTagProjector
 	private final DeferredCleanupTracker cleanupTracker =
 		new DeferredCleanupTracker();
 
-	private final AtomicBoolean active =
-		new AtomicBoolean();
-
-	private final AtomicLong lifecycleGeneration =
-		new AtomicLong();
+	private final BankTagsMembershipChangeDetector
+		membershipChangeDetector;
 
 	private long appliedGeneration = -1L;
 
@@ -69,7 +71,8 @@ public final class BankTagProjector
 		BankTagsService bankTagsService,
 		BankSearch bankSearch,
 		PriorityStateStore stateStore,
-		ClientThread clientThread)
+		ClientThread clientThread,
+		ItemManager itemManager)
 	{
 		this.layoutManager = Objects.requireNonNull(
 			layoutManager,
@@ -100,17 +103,26 @@ public final class BankTagProjector
 			clientThread,
 			"clientThread"
 		);
+
+		ItemManager requiredItemManager = Objects.requireNonNull(
+			itemManager,
+			"itemManager"
+		);
+
+		this.membershipChangeDetector =
+			new BankTagsMembershipChangeDetector(
+				requiredItemManager::canonicalize,
+				ItemVariationMapping::map
+			);
 	}
 
 	public void activate()
 	{
-		active.set(true);
-		long generation = lifecycleGeneration.incrementAndGet();
+		long generation = lifecycle.activate();
 
 		clientThread.invokeLater(() ->
 		{
-			if (active.get()
-				&& lifecycleGeneration.get() == generation)
+			if (lifecycle.isCurrent(generation, true))
 			{
 				ensureRuntimeGeneration();
 			}
@@ -119,13 +131,11 @@ public final class BankTagProjector
 
 	public void deactivate()
 	{
-		active.set(false);
-		long generation = lifecycleGeneration.incrementAndGet();
+		long generation = lifecycle.deactivate();
 
 		clientThread.invokeLater(() ->
 		{
-			if (!active.get()
-				&& lifecycleGeneration.get() == generation)
+			if (lifecycle.isCurrent(generation, false))
 			{
 				clearRuntimeState();
 				appliedGeneration = generation;
@@ -139,9 +149,39 @@ public final class BankTagProjector
 	 */
 	public void resetRuntimeState()
 	{
-		long generation = lifecycleGeneration.incrementAndGet();
+		long generation = lifecycle.advanceGeneration();
 		clearRuntimeState();
 		appliedGeneration = generation;
+	}
+
+	/**
+	 * Invalidates completed cleanup when ordinary Bank Tags membership is
+	 * added back to a managed candidate. The caller must dispatch this
+	 * method through ClientThread.
+	 */
+	public boolean invalidateOrdinaryMembershipCleanup(
+		PriorityState state,
+		String configKey,
+		String newValue)
+	{
+		Objects.requireNonNull(state, "state");
+
+		if (!lifecycle.isActive())
+		{
+			return false;
+		}
+
+		ensureRuntimeGeneration();
+
+		Set<String> affectedBindingIds =
+			membershipChangeDetector.affectedBindingIds(
+				state,
+				configKey,
+				newValue
+			);
+
+		cleanupTracker.invalidateCompleted(affectedBindingIds);
+		return !affectedBindingIds.isEmpty();
 	}
 
 	public PriorityState synchronize(
@@ -151,7 +191,7 @@ public final class BankTagProjector
 		Objects.requireNonNull(state, "state");
 		Objects.requireNonNull(bankSnapshot, "bankSnapshot");
 
-		if (!active.get())
+		if (!lifecycle.isActive())
 		{
 			return state;
 		}
@@ -285,7 +325,7 @@ public final class BankTagProjector
 	{
 		Objects.requireNonNull(state, "state");
 
-		if (!active.get())
+		if (!lifecycle.isActive())
 		{
 			return state;
 		}
@@ -379,8 +419,11 @@ public final class BankTagProjector
 			return new ProjectionResult(
 				binding,
 				false,
-				dynamicTagChanged
-					&& isActiveTag(binding.getBankTagName())
+				ProjectionRefreshPolicy.shouldRefresh(
+					isActiveTag(binding.getBankTagName()),
+					false,
+					dynamicTagChanged
+				)
 			);
 		}
 
@@ -415,8 +458,11 @@ public final class BankTagProjector
 		return new ProjectionResult(
 			plan.getBinding(),
 			plan.isBindingChanged(),
-			isActiveTag(binding.getBankTagName())
-				&& (plan.isLayoutChanged() || dynamicTagChanged)
+			ProjectionRefreshPolicy.shouldRefresh(
+				isActiveTag(binding.getBankTagName()),
+				plan.isLayoutChanged(),
+				dynamicTagChanged
+			)
 		);
 	}
 
@@ -508,12 +554,11 @@ public final class BankTagProjector
 		Set<Integer> immutableItemIds =
 			signature.getManagedItemIds();
 
-		long generation = lifecycleGeneration.get();
+		long generation = lifecycle.currentGeneration();
 
 		clientThread.invokeLater(() ->
 		{
-			if (!active.get()
-				|| lifecycleGeneration.get() != generation)
+			if (!lifecycle.isCurrent(generation, true))
 			{
 				return;
 			}
@@ -531,7 +576,8 @@ public final class BankTagProjector
 		Set<Integer> managedItemIds,
 		DeferredCleanupTracker.Token token)
 	{
-		if (!active.get() || !cleanupTracker.isCurrent(token))
+		if (!lifecycle.isActive()
+			|| !cleanupTracker.isCurrent(token))
 		{
 			return;
 		}
@@ -664,7 +710,7 @@ public final class BankTagProjector
 
 	private void ensureRuntimeGeneration()
 	{
-		long generation = lifecycleGeneration.get();
+		long generation = lifecycle.currentGeneration();
 
 		if (appliedGeneration == generation)
 		{

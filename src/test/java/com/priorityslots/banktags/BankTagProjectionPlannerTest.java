@@ -355,6 +355,73 @@ public class BankTagProjectionPlannerTest
 		assertFalse(plan.isBindingChanged());
 	}
 
+	@Test
+	public void sameOwnedWinnerCanFillMultiplePrioritySlots()
+	{
+		PriorityDefinition first = new PriorityDefinition(
+			"definition-first",
+			"First herbs",
+			List.of(new PriorityTier(
+				"tier-first",
+				List.of(LANTADYME)
+			))
+		);
+		PriorityDefinition second = new PriorityDefinition(
+			"definition-second",
+			"Second herbs",
+			List.of(new PriorityTier(
+				"tier-second",
+				List.of(LANTADYME)
+			))
+		);
+		BankTagSlotBinding firstSlot = new BankTagSlotBinding(
+			new CellPlacement(
+				"cell-first",
+				first.getId(),
+				0
+			),
+			LANTADYME,
+			LANTADYME
+		);
+		BankTagSlotBinding secondSlot = new BankTagSlotBinding(
+			new CellPlacement(
+				"cell-second",
+				second.getId(),
+				1
+			),
+			LANTADYME,
+			LANTADYME
+		);
+		BankTagBinding binding = new BankTagBinding(
+			"binding-1",
+			"Herbs",
+			List.of(firstSlot, secondSlot)
+		);
+		PriorityState state = new PriorityState(
+			List.of(first, second),
+			List.of(),
+			List.of(binding)
+		);
+
+		BankTagProjectionPlanner.Plan plan = planner.plan(
+			binding,
+			state,
+			bank(LANTADYME),
+			List.of(LANTADYME, LANTADYME)
+		);
+
+		assertEquals(
+			List.of(LANTADYME, LANTADYME),
+			plan.getProjectedLayoutItems()
+		);
+		assertEquals(
+			Set.of(LANTADYME),
+			plan.getDynamicItemIds()
+		);
+		assertTrue(plan.getConflictsByCellId().isEmpty());
+		assertFalse(plan.isLayoutChanged());
+	}
+
 	private static Fixture fixture(
 			int index,
 			int lastProjectedItemId,

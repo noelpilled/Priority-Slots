@@ -13,6 +13,7 @@ import com.priorityslots.domain.CellPlacement;
 import com.priorityslots.domain.PriorityDefinition;
 import com.priorityslots.domain.PriorityState;
 import com.priorityslots.domain.PriorityTier;
+import com.priorityslots.lifecycle.LifecycleGeneration;
 import com.priorityslots.persistence.PriorityStateStore;
 import com.priorityslots.ui.PrioritySlotsIcon;
 import com.priorityslots.ui.PrioritySlotsPanel;
@@ -73,6 +74,9 @@ public class PrioritySlotsPlugin extends Plugin
 
 	private static final String REMOVE_LAYOUT =
 			"Remove-layout";
+
+	private final LifecycleGeneration lifecycle =
+			new LifecycleGeneration();
 
 	private final BankSnapshotFactory bankSnapshotFactory =
 			new BankSnapshotFactory();
@@ -137,6 +141,7 @@ public class PrioritySlotsPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		lifecycle.activate();
 		bankTagProjector.activate();
 		configureSidebar();
 		reloadPriorityState();
@@ -145,7 +150,7 @@ public class PrioritySlotsPlugin extends Plugin
 		 * Re-enabling the plugin while the bank is already open
 		 * may not produce a new ItemContainerChanged event.
 		 */
-		clientThread.invokeLater(
+		invokeOnClientThreadWhileActive(
 				this::synchronizeFromCurrentBankIfAvailable
 		);
 
@@ -155,6 +160,8 @@ public class PrioritySlotsPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		lifecycle.deactivate();
+
 		if (bankTagProjector != null)
 		{
 			bankTagProjector.deactivate();
@@ -173,7 +180,12 @@ public class PrioritySlotsPlugin extends Plugin
 	public void onProfileChanged(
 			ProfileChanged profileChanged)
 	{
-		clientThread.invokeLater(this::reloadForProfileChange);
+		long generation = lifecycle.advanceGeneration();
+
+		invokeOnClientThreadWhileActive(
+				generation,
+				this::reloadForProfileChange
+		);
 	}
 
 	private void reloadForProfileChange()
@@ -197,6 +209,20 @@ public class PrioritySlotsPlugin extends Plugin
 	public void onConfigChanged(
 			ConfigChanged event)
 	{
+		if (BankTagsPlugin.CONFIG_GROUP.equals(event.getGroup()))
+		{
+			String key = event.getKey();
+			String newValue = event.getNewValue();
+
+			invokeOnClientThreadWhileActive(() ->
+					handleBankTagsMembershipChange(
+							key,
+							newValue
+					)
+			);
+			return;
+		}
+
 		if (!PrioritySlotsConfig.GROUP.equals(
 				event.getGroup()))
 		{
@@ -221,9 +247,53 @@ public class PrioritySlotsPlugin extends Plugin
 				false
 		);
 
-		clientThread.invokeLater(
+		invokeOnClientThreadWhileActive(
 				this::applyMvpSlot
 		);
+	}
+
+	private void handleBankTagsMembershipChange(
+			String configKey,
+			String newValue)
+	{
+		boolean cleanupInvalidated = bankTagProjector
+				.invalidateOrdinaryMembershipCleanup(
+						priorityState,
+						configKey,
+						newValue
+				);
+
+		if (!cleanupInvalidated || !bankSnapshotKnown)
+		{
+			return;
+		}
+
+		priorityState = bankTagProjector.synchronize(
+				priorityState,
+				bankSnapshot
+		);
+	}
+
+	private void invokeOnClientThreadWhileActive(
+			Runnable action)
+	{
+		invokeOnClientThreadWhileActive(
+				lifecycle.currentGeneration(),
+				action
+		);
+	}
+
+	private void invokeOnClientThreadWhileActive(
+			long generation,
+			Runnable action)
+	{
+		clientThread.invokeLater(() ->
+		{
+			if (lifecycle.isCurrent(generation, true))
+			{
+				action.run();
+			}
+		});
 	}
 
 	@Subscribe
@@ -302,7 +372,7 @@ public class PrioritySlotsPlugin extends Plugin
 			entry.setOption(REMOVE_PRIORITY_SLOT);
 			entry.setType(MenuAction.RUNELITE);
 			entry.onClick(clicked ->
-					clientThread.invokeLater(() ->
+					invokeOnClientThreadWhileActive(() ->
 							removePrioritySlotFromActiveLayout(
 									activeTag,
 									cellId
@@ -343,7 +413,7 @@ public class PrioritySlotsPlugin extends Plugin
 							String targetParentGroupId,
 							int targetIndex)
 					{
-						clientThread.invokeLater(() ->
+						invokeOnClientThreadWhileActive(() ->
 								moveGroupFromPanel(
 										groupId,
 										targetParentGroupId,
@@ -358,7 +428,7 @@ public class PrioritySlotsPlugin extends Plugin
 							String targetParentGroupId,
 							int targetIndex)
 					{
-						clientThread.invokeLater(() ->
+						invokeOnClientThreadWhileActive(() ->
 								moveDefinitionFromPanel(
 										definitionId,
 										targetParentGroupId,
@@ -373,7 +443,7 @@ public class PrioritySlotsPlugin extends Plugin
 							String tierId,
 							int targetIndex)
 					{
-						clientThread.invokeLater(() ->
+						invokeOnClientThreadWhileActive(() ->
 								moveCandidateFromPanel(
 										definitionId,
 										tierId,
@@ -386,7 +456,7 @@ public class PrioritySlotsPlugin extends Plugin
 					public void installDefinition(
 							String definitionId)
 					{
-						clientThread.invokeLater(() ->
+						invokeOnClientThreadWhileActive(() ->
 								installDefinitionFromPanel(
 										definitionId
 								)
@@ -656,59 +726,37 @@ public class PrioritySlotsPlugin extends Plugin
 		List<Integer> previousLayoutItems = layoutItems(layout);
 		PriorityState previousState = priorityState;
 
-		try
-		{
-			applyLayoutItems(layout, updatedLayoutItems);
-			layoutManager.saveLayout(layout);
-			applyAuthoringState(updatedState);
-		}
-		catch (RuntimeException exception)
-		{
-			rollbackLayoutAndState(
-					layout,
-					previousLayoutItems,
-					previousState,
-					exception
-			);
-			throw exception;
-		}
+		LayoutStateTransaction.execute(
+				() ->
+				{
+					applyLayoutItems(layout, updatedLayoutItems);
+					layoutManager.saveLayout(layout);
+				},
+				() -> applyAuthoringState(updatedState),
+				() ->
+				{
+					applyLayoutItems(layout, previousLayoutItems);
+					layoutManager.saveLayout(layout);
+				},
+				() -> restoreAuthoringState(previousState)
+		);
 	}
 
-	private void rollbackLayoutAndState(
-			Layout layout,
-			List<Integer> previousLayoutItems,
-			PriorityState previousState,
-			RuntimeException originalException)
+	private void restoreAuthoringState(
+			PriorityState previousState)
 	{
-		try
+		priorityStateStore.save(previousState);
+		priorityState = previousState;
+
+		if (bankSnapshotKnown)
 		{
-			applyLayoutItems(layout, previousLayoutItems);
-			layoutManager.saveLayout(layout);
-		}
-		catch (RuntimeException rollbackException)
-		{
-			originalException.addSuppressed(rollbackException);
+			priorityState = bankTagProjector.synchronize(
+					priorityState,
+					bankSnapshot
+			);
 		}
 
-		try
-		{
-			priorityStateStore.save(previousState);
-			priorityState = previousState;
-
-			if (bankSnapshotKnown)
-			{
-				priorityState = bankTagProjector.synchronize(
-						priorityState,
-						bankSnapshot
-				);
-			}
-
-			prioritySlotsPanel.setState(priorityState);
-		}
-		catch (RuntimeException rollbackException)
-		{
-			originalException.addSuppressed(rollbackException);
-		}
+		prioritySlotsPanel.setState(priorityState);
 	}
 
 	private void applyAuthoringState(

@@ -134,6 +134,21 @@ final class DeferredCleanupTracker
 		);
 	}
 
+	void invalidateCompleted(Collection<String> bindingIds)
+	{
+		Objects.requireNonNull(bindingIds, "bindingIds");
+
+		for (String bindingId : bindingIds)
+		{
+			completedByBindingId.remove(
+				Objects.requireNonNull(
+					bindingId,
+					"bindingIds must not contain null"
+				)
+			);
+		}
+	}
+
 	void fail(Token token)
 	{
 		Objects.requireNonNull(token, "token");

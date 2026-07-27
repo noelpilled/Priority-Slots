@@ -186,6 +186,45 @@ public class DeferredCleanupTrackerTest
 		);
 	}
 
+	@Test
+	public void readdedMembershipInvalidatesCompletedCleanup()
+	{
+		DeferredCleanupTracker tracker =
+				new DeferredCleanupTracker();
+
+		DeferredCleanupTracker.Signature signature =
+				signature(
+						"binding-1",
+						"herbs",
+						Set.of(FIRST_ITEM),
+						Set.of(0)
+				);
+		DeferredCleanupTracker.Signature unrelated =
+				signature(
+						"binding-2",
+						"supplies",
+						Set.of(SECOND_ITEM),
+						Set.of(1)
+				);
+
+		tracker.replaceCurrent(List.of(signature, unrelated));
+
+		DeferredCleanupTracker.Token token =
+				tracker.begin(signature).orElseThrow();
+		DeferredCleanupTracker.Token unrelatedToken =
+				tracker.begin(unrelated).orElseThrow();
+
+		tracker.complete(token);
+		tracker.complete(unrelatedToken);
+		assertFalse(tracker.begin(signature).isPresent());
+		assertFalse(tracker.begin(unrelated).isPresent());
+
+		tracker.invalidateCompleted(Set.of("binding-1"));
+
+		assertTrue(tracker.begin(signature).isPresent());
+		assertFalse(tracker.begin(unrelated).isPresent());
+	}
+
 	private static DeferredCleanupTracker.Signature
 	signature(
 			String bindingId,
