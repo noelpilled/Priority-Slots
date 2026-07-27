@@ -701,4 +701,181 @@ public class PrioritySlotAuthoringServiceTest
 			assertNotEquals("", expected.getMessage());
 		}
 	}
+
+
+	@Test
+	public void createsEmptyDefinitionForSidebarAuthoring()
+	{
+		PrioritySlotAuthoringService.CreateDefinitionResult result =
+			serviceWithIds("definition-empty").createDefinition(
+				PriorityState.empty(),
+				"New setup",
+				List.of(),
+				null,
+				0
+			);
+
+		assertTrue(result.getDefinition().getTiers().isEmpty());
+		assertEquals(
+			List.of(PriorityLibraryEntry.definition("definition-empty")),
+			result.getState().getRootEntries()
+		);
+	}
+
+	@Test
+	public void renamesAndEditsCandidateTiersWithoutChangingDefinitionIdentity()
+	{
+		PriorityDefinition definition = herbsDefinition();
+		PriorityState state = stateWithDefinition(definition);
+		PrioritySlotAuthoringService service = serviceWithIds(
+			"tier-unrelated"
+		);
+
+		PriorityState renamed = service.renameDefinition(
+			state,
+			definition.getId(),
+			"Updated herbs"
+		);
+		PriorityState added = service.addCandidateTier(
+			renamed,
+			definition.getId(),
+			UNRELATED
+		);
+		PriorityDefinition withAdded = added.definitionsById().get(
+			definition.getId()
+		);
+
+		assertEquals("Updated herbs", withAdded.getName());
+		assertEquals(definition.getId(), withAdded.getId());
+		assertEquals(
+			List.of(UNRELATED),
+			withAdded.getTiers().get(2).getExactItemIds()
+		);
+
+		PriorityState removed = service.removeCandidateTier(
+			added,
+			definition.getId(),
+			"tier-unrelated"
+		);
+
+		assertEquals(
+			2,
+			removed.definitionsById()
+				.get(definition.getId())
+				.getTiers().size()
+		);
+	}
+
+	@Test
+	public void rejectsDuplicateCandidateItem()
+	{
+		PriorityDefinition definition = herbsDefinition();
+
+		assertIllegalArgument(() ->
+			serviceWithIds("unused-tier").addCandidateTier(
+				stateWithDefinition(definition),
+				definition.getId(),
+				LANTADYME
+			)
+		);
+	}
+
+	@Test
+	public void installedDefinitionMustKeepOneCandidate()
+	{
+		PriorityDefinition definition = definition(
+			"definition-installed",
+			"tier-installed",
+			LANTADYME
+		);
+		BankTagSlotBinding slot = BankTagSlotBinding.create(
+			new CellPlacement(
+				"cell-installed",
+				definition.getId(),
+				0
+			),
+			LANTADYME
+		);
+		PriorityState state = new PriorityState(
+			List.of(definition),
+			List.of(),
+			List.of(new BankTagBinding(
+				"binding-installed",
+				"Herbs",
+				List.of(slot)
+			)),
+			List.of(PriorityLibraryEntry.definition(definition.getId()))
+		);
+
+		assertIllegalArgument(() ->
+			serviceWithIds().removeCandidateTier(
+				state,
+				definition.getId(),
+				"tier-installed"
+			)
+		);
+	}
+
+	@Test
+	public void deletesUninstalledDefinitionFromNestedLibrary()
+	{
+		PriorityDefinition definition = herbsDefinition();
+		PriorityGroup group = new PriorityGroup(
+			"group-herbs",
+			"Herbs",
+			List.of(PriorityLibraryEntry.definition(definition.getId()))
+		);
+		PriorityState state = new PriorityState(
+			List.of(definition),
+			List.of(group),
+			List.of(),
+			List.of(PriorityLibraryEntry.group(group.getId()))
+		);
+
+		PriorityState deleted = serviceWithIds().deleteDefinition(
+			state,
+			definition.getId()
+		);
+
+		assertTrue(deleted.getDefinitions().isEmpty());
+		assertTrue(
+			deleted.groupsById().get(group.getId())
+				.getChildren().isEmpty()
+		);
+	}
+
+	@Test
+	public void rejectsDeletingInstalledDefinition()
+	{
+		PriorityDefinition definition = definition(
+			"definition-installed",
+			"tier-installed",
+			LANTADYME
+		);
+		BankTagSlotBinding slot = BankTagSlotBinding.create(
+			new CellPlacement(
+				"cell-installed",
+				definition.getId(),
+				0
+			),
+			LANTADYME
+		);
+		PriorityState state = new PriorityState(
+			List.of(definition),
+			List.of(),
+			List.of(new BankTagBinding(
+				"binding-installed",
+				"Herbs",
+				List.of(slot)
+			)),
+			List.of(PriorityLibraryEntry.definition(definition.getId()))
+		);
+
+		assertIllegalArgument(() ->
+			serviceWithIds().deleteDefinition(
+				state,
+				definition.getId()
+			)
+		);
+	}
 }

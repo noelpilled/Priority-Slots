@@ -5,6 +5,7 @@ import com.priorityslots.domain.PriorityGroup;
 import com.priorityslots.domain.PriorityLibraryEntry;
 import com.priorityslots.domain.PriorityState;
 import com.priorityslots.domain.PriorityTier;
+import com.priorityslots.itemsearch.PriorityItemSearchResult;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -32,6 +33,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JSeparator;
@@ -62,6 +64,45 @@ public final class PrioritySlotsPanel extends PluginPanel
 	private static final Listener NOOP_LISTENER =
 		new Listener()
 		{
+
+			@Override
+			public void createDefinition(String name)
+			{
+			}
+
+			@Override
+			public void renameDefinition(
+				String definitionId,
+				String name)
+			{
+			}
+
+			@Override
+			public void searchItems(
+				String definitionId,
+				String query)
+			{
+			}
+
+			@Override
+			public void addCandidateTier(
+				String definitionId,
+				int exactItemId)
+			{
+			}
+
+			@Override
+			public void removeCandidateTier(
+				String definitionId,
+				String tierId)
+			{
+			}
+
+			@Override
+			public void deleteDefinition(String definitionId)
+			{
+			}
+
 			@Override
 			public void moveGroup(
 				String groupId,
@@ -172,6 +213,96 @@ public final class PrioritySlotsPanel extends PluginPanel
 		rebuild();
 	}
 
+
+	public void openDefinition(String definitionId)
+	{
+		String requiredDefinitionId = Objects.requireNonNull(
+			definitionId,
+			"definitionId"
+		);
+
+		if (!SwingUtilities.isEventDispatchThread())
+		{
+			SwingUtilities.invokeLater(
+				() -> openDefinition(requiredDefinitionId)
+			);
+			return;
+		}
+
+		if (!state.definitionsById().containsKey(requiredDefinitionId))
+		{
+			return;
+		}
+
+		selectedDefinitionId = requiredDefinitionId;
+		rebuild();
+	}
+
+	public void showItemSearchResults(
+		String definitionId,
+		String query,
+		List<PriorityItemSearchResult> results)
+	{
+		String requiredDefinitionId = Objects.requireNonNull(
+			definitionId,
+			"definitionId"
+		);
+		String requiredQuery = Objects.requireNonNull(query, "query");
+		List<PriorityItemSearchResult> copiedResults =
+			List.copyOf(Objects.requireNonNull(results, "results"));
+
+		if (!SwingUtilities.isEventDispatchThread())
+		{
+			SwingUtilities.invokeLater(() ->
+				showItemSearchResults(
+					requiredDefinitionId,
+					requiredQuery,
+					copiedResults
+				)
+			);
+			return;
+		}
+
+		PriorityDefinition definition = state.definitionsById().get(
+			requiredDefinitionId
+		);
+
+		if (definition == null)
+		{
+			return;
+		}
+
+		if (copiedResults.isEmpty())
+		{
+			showMessage(
+				"No exact items matched \"" + requiredQuery + "\".",
+				true
+			);
+			return;
+		}
+
+		PriorityItemSearchResult selected =
+			(PriorityItemSearchResult) JOptionPane.showInputDialog(
+				this,
+				"Select the exact item to add to "
+					+ displayDefinitionName(definition)
+					+ ":",
+				"Add priority item",
+				JOptionPane.PLAIN_MESSAGE,
+				null,
+				copiedResults.toArray(),
+				copiedResults.get(0)
+			);
+
+		if (selected != null)
+		{
+			listener.addCandidateTier(
+				requiredDefinitionId,
+				selected.getExactItemId()
+			);
+		}
+	}
+
 	public void showMessage(String message, boolean error)
 	{
 		String requiredMessage = Objects.requireNonNull(
@@ -256,8 +387,18 @@ public final class PrioritySlotsPanel extends PluginPanel
 		content.add(titleLabel("Priority Slots"));
 		content.add(Box.createVerticalStrut(4));
 		content.add(hintLabel(
-			"Select a definition to view and reorder its priority items."
+			"Select a definition to view and edit its priority items."
 		));
+		content.add(Box.createVerticalStrut(8));
+
+		JButton createDefinition = new JButton("New definition");
+		createDefinition.addActionListener(event ->
+			promptCreateDefinition()
+		);
+		createDefinition.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, 32)
+		);
+		content.add(createDefinition);
 		content.add(Box.createVerticalStrut(8));
 		content.add(divider());
 		content.add(Box.createVerticalStrut(8));
@@ -482,12 +623,26 @@ public final class PrioritySlotsPanel extends PluginPanel
 			index,
 			siblingCount
 		);
-		menu.insert(new JSeparator(), 0);
 		JMenuItem install = new JMenuItem("Add to open Bank Tag");
+		install.setEnabled(!definition.getTiers().isEmpty());
 		install.addActionListener(event ->
 			listener.installDefinition(definition.getId())
 		);
 		menu.insert(install, 0);
+		menu.insert(new JSeparator(), 1);
+		menu.add(new JSeparator());
+
+		JMenuItem rename = new JMenuItem("Rename definition");
+		rename.addActionListener(event ->
+			promptRenameDefinition(definition)
+		);
+		menu.add(rename);
+
+		JMenuItem delete = new JMenuItem("Delete definition");
+		delete.addActionListener(event ->
+			confirmDeleteDefinition(definition)
+		);
+		menu.add(delete);
 		setPopupRecursively(card, menu);
 
 		return card;
@@ -558,7 +713,18 @@ public final class PrioritySlotsPanel extends PluginPanel
 			content.add(Box.createVerticalStrut(8));
 		}
 
+		JButton addItem = new JButton("Add priority item");
+		addItem.addActionListener(event ->
+			promptItemSearch(definition)
+		);
+		addItem.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, 32)
+		);
+		content.add(addItem);
+		content.add(Box.createVerticalStrut(6));
+
 		JButton addToTag = new JButton("Add to open Bank Tag");
+		addToTag.setEnabled(!tiers.isEmpty());
 		addToTag.setToolTipText(
 			"Insert this definition into the first empty cell of the currently open Bank Tag layout"
 		);
@@ -569,6 +735,25 @@ public final class PrioritySlotsPanel extends PluginPanel
 			new Dimension(Integer.MAX_VALUE, 32)
 		);
 		content.add(addToTag);
+		content.add(Box.createVerticalStrut(6));
+
+		JPanel definitionActions = new JPanel(
+			new FlowLayout(FlowLayout.LEFT, 4, 0)
+		);
+		definitionActions.setOpaque(false);
+
+		JButton rename = compactButton("Rename");
+		rename.addActionListener(event ->
+			promptRenameDefinition(definition)
+		);
+		definitionActions.add(rename);
+
+		JButton delete = compactButton("Delete");
+		delete.addActionListener(event ->
+			confirmDeleteDefinition(definition)
+		);
+		definitionActions.add(delete);
+		content.add(definitionActions);
 		content.add(statusLabel);
 	}
 
@@ -783,6 +968,119 @@ public final class PrioritySlotsPanel extends PluginPanel
 				targetParentGroupId,
 				targetIndex
 			);
+		}
+	}
+
+
+	private void promptCreateDefinition()
+	{
+		String name = (String) JOptionPane.showInputDialog(
+			this,
+			"Definition name:",
+			"New priority definition",
+			JOptionPane.PLAIN_MESSAGE,
+			null,
+			null,
+			""
+		);
+
+		if (name == null)
+		{
+			return;
+		}
+
+		String trimmedName = name.trim();
+
+		if (trimmedName.isEmpty())
+		{
+			showMessage("Definition name must not be blank.", true);
+			return;
+		}
+
+		listener.createDefinition(trimmedName);
+	}
+
+	private void promptRenameDefinition(
+		PriorityDefinition definition)
+	{
+		String name = (String) JOptionPane.showInputDialog(
+			this,
+			"Definition name:",
+			"Rename priority definition",
+			JOptionPane.PLAIN_MESSAGE,
+			null,
+			null,
+			definition.getName()
+		);
+
+		if (name == null)
+		{
+			return;
+		}
+
+		String trimmedName = name.trim();
+
+		if (trimmedName.isEmpty())
+		{
+			showMessage("Definition name must not be blank.", true);
+			return;
+		}
+
+		listener.renameDefinition(
+			definition.getId(),
+			trimmedName
+		);
+	}
+
+	private void promptItemSearch(
+		PriorityDefinition definition)
+	{
+		String query = (String) JOptionPane.showInputDialog(
+			this,
+			"Search exact item names:",
+			"Add priority item",
+			JOptionPane.PLAIN_MESSAGE,
+			null,
+			null,
+			""
+		);
+
+		if (query == null)
+		{
+			return;
+		}
+
+		String trimmedQuery = query.trim();
+
+		if (trimmedQuery.length() < 2)
+		{
+			showMessage(
+				"Enter at least two characters to search items.",
+				true
+			);
+			return;
+		}
+
+		listener.searchItems(
+			definition.getId(),
+			trimmedQuery
+		);
+	}
+
+	private void confirmDeleteDefinition(
+		PriorityDefinition definition)
+	{
+		int choice = JOptionPane.showConfirmDialog(
+			this,
+			"Delete \"" + displayDefinitionName(definition) + "\"?",
+			"Delete priority definition",
+			JOptionPane.OK_CANCEL_OPTION,
+			JOptionPane.WARNING_MESSAGE
+		);
+
+		if (choice == JOptionPane.OK_OPTION)
+		{
+			listener.deleteDefinition(definition.getId());
 		}
 	}
 
@@ -1044,6 +1342,26 @@ public final class PrioritySlotsPanel extends PluginPanel
 
 	public interface Listener
 	{
+		void createDefinition(String name);
+
+		void renameDefinition(
+			String definitionId,
+			String name);
+
+		void searchItems(
+			String definitionId,
+			String query);
+
+		void addCandidateTier(
+			String definitionId,
+			int exactItemId);
+
+		void removeCandidateTier(
+			String definitionId,
+			String tierId);
+
+		void deleteDefinition(String definitionId);
+
 		void moveGroup(
 			String groupId,
 			String targetParentGroupId,
@@ -1142,7 +1460,23 @@ public final class PrioritySlotsPanel extends PluginPanel
 			rank = new JLabel(Integer.toString(index + 1));
 			rank.setForeground(Color.LIGHT_GRAY);
 			rank.setHorizontalAlignment(SwingConstants.RIGHT);
-			add(rank, BorderLayout.EAST);
+
+			JPanel actions = new JPanel(
+				new FlowLayout(FlowLayout.RIGHT, 4, 0)
+			);
+			actions.setOpaque(false);
+			actions.add(rank);
+
+			JButton remove = compactButton("×");
+			remove.setToolTipText("Remove priority item");
+			remove.addActionListener(event ->
+				listener.removeCandidateTier(
+					definitionId,
+					tierId
+				)
+			);
+			actions.add(remove);
+			add(actions, BorderLayout.EAST);
 
 			CandidateDragMouseAdapter drag =
 				new CandidateDragMouseAdapter(

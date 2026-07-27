@@ -97,13 +97,6 @@ public final class PrioritySlotAuthoringService
 			"orderedExactItemIds"
 		);
 
-		if (orderedExactItemIds.isEmpty())
-		{
-			throw new IllegalArgumentException(
-				"orderedExactItemIds must not be empty"
-			);
-		}
-
 		Set<Integer> seenItemIds = new HashSet<>();
 		List<PriorityTier> tiers = new ArrayList<>();
 
@@ -167,6 +160,170 @@ public final class PrioritySlotAuthoringService
 		return new CreateDefinitionResult(
 			moved,
 			definition
+		);
+	}
+
+
+	public PriorityState renameDefinition(
+		PriorityState state,
+		String definitionId,
+		String name)
+	{
+		Objects.requireNonNull(state, "state");
+
+		PriorityDefinition definition = requireDefinition(
+			state,
+			definitionId
+		);
+
+		return replaceDefinition(
+			state,
+			definition,
+			definition.withName(requireNonBlank(name, "name"))
+		);
+	}
+
+	public PriorityState addCandidateTier(
+		PriorityState state,
+		String definitionId,
+		int exactItemId)
+	{
+		Objects.requireNonNull(state, "state");
+
+		if (exactItemId <= 0)
+		{
+			throw new IllegalArgumentException(
+				"exactItemId must be positive"
+			);
+		}
+
+		PriorityDefinition definition = requireDefinition(
+			state,
+			definitionId
+		);
+
+		for (PriorityTier tier : definition.getTiers())
+		{
+			if (tier.getExactItemIds().contains(exactItemId))
+			{
+				throw new IllegalArgumentException(
+					"Item is already in this definition: "
+						+ exactItemId
+				);
+			}
+		}
+
+		List<PriorityTier> tiers =
+			new ArrayList<>(definition.getTiers());
+
+		tiers.add(new PriorityTier(
+			nextId(),
+			List.of(exactItemId)
+		));
+
+		return replaceDefinition(
+			state,
+			definition,
+			definition.withTiers(tiers)
+		);
+	}
+
+	public PriorityState removeCandidateTier(
+		PriorityState state,
+		String definitionId,
+		String tierId)
+	{
+		Objects.requireNonNull(state, "state");
+
+		PriorityDefinition definition = requireDefinition(
+			state,
+			definitionId
+		);
+
+		String requiredTierId = requireNonBlank(
+			tierId,
+			"tierId"
+		);
+
+		List<PriorityTier> tiers =
+			new ArrayList<>(definition.getTiers());
+
+		boolean removed = tiers.removeIf(
+			tier -> tier.getId().equals(requiredTierId)
+		);
+
+		if (!removed)
+		{
+			throw new IllegalArgumentException(
+				"Unknown candidate tier: " + requiredTierId
+			);
+		}
+
+		if (tiers.isEmpty()
+			&& isDefinitionInstalled(state, definition.getId()))
+		{
+			throw new IllegalArgumentException(
+				"An installed definition must keep at least one item"
+			);
+		}
+
+		return replaceDefinition(
+			state,
+			definition,
+			definition.withTiers(tiers)
+		);
+	}
+
+	public PriorityState deleteDefinition(
+		PriorityState state,
+		String definitionId)
+	{
+		Objects.requireNonNull(state, "state");
+
+		PriorityDefinition definition = requireDefinition(
+			state,
+			definitionId
+		);
+
+		if (isDefinitionInstalled(state, definition.getId()))
+		{
+			throw new IllegalArgumentException(
+				"Remove this definition from every Bank Tag before deleting it"
+			);
+		}
+
+		PriorityLibraryEntry libraryEntry =
+			PriorityLibraryEntry.definition(definition.getId());
+
+		List<PriorityDefinition> definitions =
+			new ArrayList<>(state.getDefinitions());
+		definitions.remove(definition);
+
+		List<PriorityLibraryEntry> rootEntries =
+			new ArrayList<>(state.getRootEntries());
+		rootEntries.remove(libraryEntry);
+
+		List<PriorityGroup> groups = new ArrayList<>();
+
+		for (PriorityGroup group : state.getGroups())
+		{
+			if (!group.getChildren().contains(libraryEntry))
+			{
+				groups.add(group);
+				continue;
+			}
+
+			List<PriorityLibraryEntry> children =
+				new ArrayList<>(group.getChildren());
+			children.remove(libraryEntry);
+			groups.add(group.withChildren(children));
+		}
+
+		return new PriorityState(
+			definitions,
+			groups,
+			state.getBindings(),
+			rootEntries
 		);
 	}
 
@@ -715,6 +872,66 @@ public final class PrioritySlotAuthoringService
 		}
 
 		return null;
+	}
+
+
+	private static PriorityDefinition requireDefinition(
+		PriorityState state,
+		String definitionId)
+	{
+		String requiredDefinitionId = requireNonBlank(
+			definitionId,
+			"definitionId"
+		);
+
+		PriorityDefinition definition =
+			state.definitionsById().get(requiredDefinitionId);
+
+		if (definition == null)
+		{
+			throw new IllegalArgumentException(
+				"Unknown definition: " + requiredDefinitionId
+			);
+		}
+
+		return definition;
+	}
+
+	private static PriorityState replaceDefinition(
+		PriorityState state,
+		PriorityDefinition previous,
+		PriorityDefinition updated)
+	{
+		List<PriorityDefinition> definitions =
+			new ArrayList<>(state.getDefinitions());
+
+		definitions.set(definitions.indexOf(previous), updated);
+
+		return new PriorityState(
+			definitions,
+			state.getGroups(),
+			state.getBindings(),
+			state.getRootEntries()
+		);
+	}
+
+	private static boolean isDefinitionInstalled(
+		PriorityState state,
+		String definitionId)
+	{
+		for (BankTagBinding binding : state.getBindings())
+		{
+			for (BankTagSlotBinding slot : binding.getSlots())
+			{
+				if (slot.getPlacement().getDefinitionId()
+					.equals(definitionId))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	private String nextId()

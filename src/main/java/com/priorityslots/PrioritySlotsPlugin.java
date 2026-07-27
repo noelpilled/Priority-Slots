@@ -9,6 +9,7 @@ import com.priorityslots.banktags.BankTagProjector;
 import com.priorityslots.domain.BankSnapshot;
 import com.priorityslots.domain.PriorityDefinition;
 import com.priorityslots.domain.PriorityState;
+import com.priorityslots.itemsearch.PriorityItemSearchService;
 import com.priorityslots.lifecycle.LifecycleGeneration;
 import com.priorityslots.persistence.PriorityStateStore;
 import com.priorityslots.ui.PrioritySlotsIcon;
@@ -100,6 +101,9 @@ public class PrioritySlotsPlugin extends Plugin
 
 	@Inject
 	private PrioritySlotAuthoringService authoringService;
+
+	@Inject
+	private PriorityItemSearchService itemSearchService;
 
 	@Inject
 	private PrioritySlotsPanel prioritySlotsPanel;
@@ -403,6 +407,75 @@ public class PrioritySlotsPlugin extends Plugin
 		prioritySlotsPanel.setListener(
 				new PrioritySlotsPanel.Listener()
 				{
+
+					@Override
+					public void createDefinition(String name)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							createDefinitionFromPanel(name)
+						);
+					}
+
+					@Override
+					public void renameDefinition(
+						String definitionId,
+						String name)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							renameDefinitionFromPanel(
+								definitionId,
+								name
+							)
+						);
+					}
+
+					@Override
+					public void searchItems(
+						String definitionId,
+						String query)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							searchItemsFromPanel(
+								definitionId,
+								query
+							)
+						);
+					}
+
+					@Override
+					public void addCandidateTier(
+						String definitionId,
+						int exactItemId)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							addCandidateFromPanel(
+								definitionId,
+								exactItemId
+							)
+						);
+					}
+
+					@Override
+					public void removeCandidateTier(
+						String definitionId,
+						String tierId)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							removeCandidateFromPanel(
+								definitionId,
+								tierId
+							)
+						);
+					}
+
+					@Override
+					public void deleteDefinition(String definitionId)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							deleteDefinitionFromPanel(definitionId)
+						);
+					}
+
 					@Override
 					public void moveGroup(
 							String groupId,
@@ -480,6 +553,176 @@ public class PrioritySlotsPlugin extends Plugin
 		{
 			clientToolbar.removeNavigation(navigationButton);
 			navigationButton = null;
+		}
+	}
+
+
+	private void createDefinitionFromPanel(String name)
+	{
+		try
+		{
+			PrioritySlotAuthoringService.CreateDefinitionResult result =
+				authoringService.createDefinition(
+					priorityState,
+					name,
+					List.of(),
+					null,
+					priorityState.getRootEntries().size()
+				);
+
+			applyAuthoringState(result.getState());
+			prioritySlotsPanel.openDefinition(
+				result.getDefinition().getId()
+			);
+			prioritySlotsPanel.showMessage(
+				"Created " + result.getDefinition().getName() + ".",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to create definition",
+				exception
+			);
+		}
+	}
+
+	private void renameDefinitionFromPanel(
+		String definitionId,
+		String name)
+	{
+		try
+		{
+			applyAuthoringState(
+				authoringService.renameDefinition(
+					priorityState,
+					definitionId,
+					name
+				)
+			);
+
+			prioritySlotsPanel.showMessage(
+				"Definition renamed.",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to rename definition",
+				exception
+			);
+		}
+	}
+
+	private void searchItemsFromPanel(
+		String definitionId,
+		String query)
+	{
+		try
+		{
+			if (!priorityState.definitionsById().containsKey(
+				definitionId))
+			{
+				throw new IllegalArgumentException(
+					"Priority definition no longer exists."
+				);
+			}
+
+			prioritySlotsPanel.showItemSearchResults(
+				definitionId,
+				query,
+				itemSearchService.search(query)
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to search items",
+				exception
+			);
+		}
+	}
+
+	private void addCandidateFromPanel(
+		String definitionId,
+		int exactItemId)
+	{
+		try
+		{
+			applyAuthoringState(
+				authoringService.addCandidateTier(
+					priorityState,
+					definitionId,
+					exactItemId
+				)
+			);
+
+			prioritySlotsPanel.showMessage(
+				"Priority item added.",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to add priority item",
+				exception
+			);
+		}
+	}
+
+	private void removeCandidateFromPanel(
+		String definitionId,
+		String tierId)
+	{
+		try
+		{
+			applyAuthoringState(
+				authoringService.removeCandidateTier(
+					priorityState,
+					definitionId,
+					tierId
+				)
+			);
+
+			prioritySlotsPanel.showMessage(
+				"Priority item removed.",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to remove priority item",
+				exception
+			);
+		}
+	}
+
+	private void deleteDefinitionFromPanel(String definitionId)
+	{
+		try
+		{
+			applyAuthoringState(
+				authoringService.deleteDefinition(
+					priorityState,
+					definitionId
+				)
+			);
+
+			prioritySlotsPanel.showMessage(
+				"Definition deleted.",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to delete definition",
+				exception
+			);
 		}
 	}
 
