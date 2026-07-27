@@ -117,7 +117,8 @@ final class BankTagProjectionPlanner
 				continue;
 			}
 
-			if (!slot.matchesLayoutItem(currentItemId))
+			if (currentItemId > 0
+					&& !slot.matchesLayoutItem(currentItemId))
 			{
 				addPositive(
 						dynamicItemIds,

@@ -7,12 +7,8 @@ import com.priorityslots.banktags.BankTagLayoutReader;
 import com.priorityslots.banktags.BankTagLayoutSnapshot;
 import com.priorityslots.banktags.BankTagProjector;
 import com.priorityslots.domain.BankSnapshot;
-import com.priorityslots.domain.BankTagBinding;
-import com.priorityslots.domain.BankTagSlotBinding;
-import com.priorityslots.domain.CellPlacement;
 import com.priorityslots.domain.PriorityDefinition;
 import com.priorityslots.domain.PriorityState;
-import com.priorityslots.domain.PriorityTier;
 import com.priorityslots.lifecycle.LifecycleGeneration;
 import com.priorityslots.persistence.PriorityStateStore;
 import com.priorityslots.ui.PrioritySlotsIcon;
@@ -946,67 +942,31 @@ public class PrioritySlotsPlugin extends Plugin
 				);
 			}
 
-			List<PriorityTier> tiers =
-					new ArrayList<>();
-
-			for (Integer exactItemId
-					: exactItemIds)
-			{
-				tiers.add(
-						PriorityTier.create(
-								List.of(exactItemId)
-						)
-				);
-			}
-
-			PriorityDefinition definition =
-					PriorityDefinition.create(
+			PrioritySlotAuthoringService.CreateDefinitionResult
+					createdDefinition =
+					authoringService.createDefinition(
+							priorityState,
 							"MVP "
 									+ bankTagName
 									+ " slot "
 									+ layoutIndex,
-							tiers
-					);
-
-			CellPlacement placement =
-					CellPlacement.create(
-							definition.getId(),
-							layoutIndex
-					);
-
-			BankTagSlotBinding slot =
-					BankTagSlotBinding.create(
-							placement,
-							fallbackExactItemId
-					);
-
-			BankTagBinding binding =
-					BankTagBinding.create(
-							bankTagName,
-							List.of(slot)
+							exactItemIds,
+							null,
+							priorityState.getRootEntries().size()
 					);
 
 			PriorityState newState =
-					new PriorityState(
-							List.of(definition),
-							List.of(),
-							List.of(binding)
+					authoringService.attachDefinitionToLayoutCell(
+							createdDefinition.getState(),
+							bankTagName,
+							layoutIndex,
+							fallbackExactItemId,
+							createdDefinition.getDefinition().getId()
 					);
 
-			bankTagProjector.resetRuntimeState();
+			applyAuthoringState(newState);
 
-			priorityStateStore.save(newState);
-			priorityState = newState;
-
-			if (bankSnapshotKnown)
-			{
-				priorityState =
-						bankTagProjector.synchronize(
-								priorityState,
-								bankSnapshot
-						);
-			}
-			else
+			if (!bankSnapshotKnown)
 			{
 				log.debug(
 						"Saved MVP priority slot; "
@@ -1014,8 +974,6 @@ public class PrioritySlotsPlugin extends Plugin
 								+ "a bank snapshot is available"
 				);
 			}
-
-			prioritySlotsPanel.setState(priorityState);
 
 			log.info(
 					"Applied MVP priority slot to "

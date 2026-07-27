@@ -286,6 +286,122 @@ public final class PrioritySlotAuthoringService
 		);
 	}
 
+
+	public PriorityState attachDefinitionToLayoutCell(
+		PriorityState state,
+		String bankTagName,
+		int layoutIndex,
+		int currentLayoutItemId,
+		String definitionId)
+	{
+		Objects.requireNonNull(state, "state");
+
+		String requiredBankTagName = requireNonBlank(
+			bankTagName,
+			"bankTagName"
+		);
+
+		String requiredDefinitionId = requireNonBlank(
+			definitionId,
+			"definitionId"
+		);
+
+		if (layoutIndex < 0)
+		{
+			throw new IllegalArgumentException(
+				"layoutIndex must not be negative"
+			);
+		}
+
+		if (currentLayoutItemId <= 0)
+		{
+			throw new IllegalArgumentException(
+				"currentLayoutItemId must be positive"
+			);
+		}
+
+		if (!state.definitionsById().containsKey(
+			requiredDefinitionId))
+		{
+			throw new IllegalArgumentException(
+				"Unknown definition: "
+					+ requiredDefinitionId
+			);
+		}
+
+		BankTagBinding existingBinding =
+			bindingForTag(state, requiredBankTagName);
+
+		if (existingBinding != null)
+		{
+			for (BankTagSlotBinding existingSlot
+				: existingBinding.getSlots())
+			{
+				if (existingSlot.getPlacement().getIndex()
+					== layoutIndex)
+				{
+					throw new IllegalArgumentException(
+						"Layout cell is already managed "
+							+ "by a priority slot"
+					);
+				}
+
+				if (existingSlot.getPlacement()
+					.getDefinitionId()
+					.equals(requiredDefinitionId))
+				{
+					throw new IllegalArgumentException(
+						"Definition is already installed "
+							+ "in this Bank Tag"
+					);
+				}
+			}
+		}
+
+		CellPlacement placement = CellPlacement.create(
+			requiredDefinitionId,
+			layoutIndex
+		);
+
+		BankTagSlotBinding slot =
+			BankTagSlotBinding.create(
+				placement,
+				currentLayoutItemId
+			);
+
+		List<BankTagBinding> bindings =
+			new ArrayList<>(state.getBindings());
+
+		if (existingBinding == null)
+		{
+			bindings.add(
+				BankTagBinding.create(
+					requiredBankTagName,
+					List.of(slot)
+				)
+			);
+		}
+		else
+		{
+			List<BankTagSlotBinding> slots =
+				new ArrayList<>(existingBinding.getSlots());
+
+			slots.add(slot);
+
+			bindings.set(
+				bindings.indexOf(existingBinding),
+				existingBinding.withSlots(slots)
+			);
+		}
+
+		return new PriorityState(
+			state.getDefinitions(),
+			state.getGroups(),
+			bindings,
+			state.getRootEntries()
+		);
+	}
+
 	public InstallationResult installDefinitionInActiveLayout(
 		PriorityState state,
 		String activeBankTagName,

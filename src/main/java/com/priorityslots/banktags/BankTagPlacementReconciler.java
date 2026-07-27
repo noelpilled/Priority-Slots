@@ -56,16 +56,18 @@ final class BankTagPlacementReconciler
 			}
 			else
 			{
-				reconciledIndex = findUniqueItemPosition(
+				reconciledIndex = findReconciledItemPosition(
 						itemAtPosition,
 						layoutSize,
-						expectedItemId
+						expectedItemId,
+						previousIndex,
+						claimedIndices
 				);
 			}
 
 			if (reconciledIndex < 0
 					|| !claimedIndices.add(
-					reconciledIndex))
+						reconciledIndex))
 			{
 				return Result.unsafe(binding);
 			}
@@ -104,7 +106,7 @@ final class BankTagPlacementReconciler
 			updatedSlots.add(
 					new BankTagSlotBinding(
 							slot.getPlacement().withIndex(
-									reconciledIndex
+								reconciledIndex
 							),
 							slot.getFallbackExactItemId(),
 							slot.getLastProjectedExactItemId()
@@ -117,10 +119,12 @@ final class BankTagPlacementReconciler
 		);
 	}
 
-	private static int findUniqueItemPosition(
+	private static int findReconciledItemPosition(
 			IntUnaryOperator itemAtPosition,
 			int layoutSize,
-			int exactItemId)
+			int exactItemId,
+			int previousIndex,
+			Set<Integer> claimedIndices)
 	{
 		int foundIndex = -1;
 
@@ -128,7 +132,8 @@ final class BankTagPlacementReconciler
 		     index < layoutSize;
 		     index++)
 		{
-			if (itemAtPosition.applyAsInt(index)
+			if (claimedIndices.contains(index)
+					|| itemAtPosition.applyAsInt(index)
 					!= exactItemId)
 			{
 				continue;
@@ -142,7 +147,20 @@ final class BankTagPlacementReconciler
 			foundIndex = index;
 		}
 
-		return foundIndex;
+		if (foundIndex >= 0)
+		{
+			return foundIndex;
+		}
+
+		if (previousIndex >= 0
+				&& previousIndex < layoutSize
+				&& !claimedIndices.contains(previousIndex)
+				&& itemAtPosition.applyAsInt(previousIndex) <= 0)
+		{
+			return previousIndex;
+		}
+
+		return -1;
 	}
 
 	static final class Result
