@@ -13,6 +13,7 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
+import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -39,12 +40,16 @@ import javax.swing.JPopupMenu;
 import javax.swing.JSeparator;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.util.AsyncBufferedImage;
 
 @Singleton
@@ -53,6 +58,8 @@ public final class PrioritySlotsPanel extends PluginPanel
 	private static final int INDENT_WIDTH = 14;
 	private static final int ITEM_ICON_SIZE = 36;
 	private static final int MAX_PREVIEW_ITEMS = 3;
+	private static final int MIN_ITEM_SEARCH_LENGTH = 2;
+	private static final int ITEM_SEARCH_DEBOUNCE_MS = 180;
 
 	private static final Color SUCCESS_COLOR =
 		new Color(115, 200, 125);
@@ -143,6 +150,17 @@ public final class PrioritySlotsPanel extends PluginPanel
 	private volatile Listener listener = NOOP_LISTENER;
 	private PriorityState state = PriorityState.empty();
 	private String selectedDefinitionId;
+	private final IconTextField itemSearchField =
+		new IconTextField();
+	private final JPanel itemSearchResultsPanel = new JPanel();
+	private final Timer itemSearchTimer;
+	private String itemSearchDefinitionId;
+	private String itemSearchQuery = "";
+	private List<PriorityItemSearchResult> itemSearchResults = List.of();
+	private boolean itemSearchPending;
+	private boolean itemSearchCompleted;
+	private boolean suppressItemSearchDocumentEvents;
+	private boolean itemSearchDocumentUpdateQueued;
 
 	@Inject
 	public PrioritySlotsPanel(
@@ -168,8 +186,72 @@ public final class PrioritySlotsPanel extends PluginPanel
 			SwingUtilities::invokeLater
 		);
 
+		this.itemSearchTimer = new Timer(
+			ITEM_SEARCH_DEBOUNCE_MS,
+			event -> submitLiveItemSearch()
+		);
+		itemSearchTimer.setRepeats(false);
+		itemSearchField.setToolTipText(
+			"Search exact item names"
+		);
+		itemSearchField.setIcon(IconTextField.Icon.SEARCH);
+		itemSearchField.setBackground(
+			ColorScheme.DARKER_GRAY_COLOR
+		);
+		itemSearchField.setHoverBackgroundColor(
+			ColorScheme.MEDIUM_GRAY_COLOR
+		);
+		itemSearchField.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, 30)
+		);
+
+		itemSearchResultsPanel.setOpaque(false);
+		itemSearchResultsPanel.setLayout(
+			new BoxLayout(
+				itemSearchResultsPanel,
+				BoxLayout.Y_AXIS
+			)
+		);
+		itemSearchResultsPanel.setAlignmentX(
+			Component.LEFT_ALIGNMENT
+		);
+
+		itemSearchField.getDocument().addDocumentListener(
+			new DocumentListener()
+			{
+				@Override
+				public void insertUpdate(DocumentEvent event)
+				{
+					queueItemSearchTextChanged();
+				}
+
+				@Override
+				public void removeUpdate(DocumentEvent event)
+				{
+					queueItemSearchTextChanged();
+				}
+
+				@Override
+				public void changedUpdate(DocumentEvent event)
+				{
+					queueItemSearchTextChanged();
+				}
+			}
+		);
+
 		statusLabel.setForeground(Color.LIGHT_GRAY);
 		statusLabel.setBorder(new EmptyBorder(6, 2, 0, 2));
+
+		/*
+		 * Keep wheel and trackpad scrolling without showing a sidebar scrollbar.
+		 * The scrollbar remains logically visible for Swing's wheel handler, but
+		 * occupies no layout width and therefore is not painted.
+		 */
+		getScrollPane().getVerticalScrollBar().setPreferredSize(
+			new Dimension(0, 0)
+		);
+		getScrollPane().getVerticalScrollBar().setUnitIncrement(32);
+		getScrollPane().getVerticalScrollBar().setBlockIncrement(160);
 
 		rebuild();
 	}
@@ -204,13 +286,14 @@ public final class PrioritySlotsPanel extends PluginPanel
 			))
 		{
 			selectedDefinitionId = null;
+			resetItemSearch(null);
 		}
 
 		itemNameCache.request(
 			candidateItemIds(requiredState),
-			this::rebuild
+			this::rebuildPreservingItemSearchFocus
 		);
-		rebuild();
+		rebuildPreservingItemSearchFocus();
 	}
 
 
@@ -235,6 +318,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 		}
 
 		selectedDefinitionId = requiredDefinitionId;
+		resetItemSearch(requiredDefinitionId);
 		rebuild();
 	}
 
@@ -247,7 +331,10 @@ public final class PrioritySlotsPanel extends PluginPanel
 			definitionId,
 			"definitionId"
 		);
-		String requiredQuery = Objects.requireNonNull(query, "query");
+		String requiredQuery = Objects.requireNonNull(
+			query,
+			"query"
+		).trim();
 		List<PriorityItemSearchResult> copiedResults =
 			List.copyOf(Objects.requireNonNull(results, "results"));
 
@@ -263,44 +350,20 @@ public final class PrioritySlotsPanel extends PluginPanel
 			return;
 		}
 
-		PriorityDefinition definition = state.definitionsById().get(
-			requiredDefinitionId
-		);
+		String currentQuery = itemSearchField.getText().trim();
 
-		if (definition == null)
+		if (!Objects.equals(selectedDefinitionId, requiredDefinitionId)
+			|| !Objects.equals(itemSearchDefinitionId, requiredDefinitionId)
+			|| !currentQuery.equals(requiredQuery))
 		{
 			return;
 		}
 
-		if (copiedResults.isEmpty())
-		{
-			showMessage(
-				"No exact items matched \"" + requiredQuery + "\".",
-				true
-			);
-			return;
-		}
-
-		PriorityItemSearchResult selected =
-			(PriorityItemSearchResult) JOptionPane.showInputDialog(
-				this,
-				"Select the exact item to add to "
-					+ displayDefinitionName(definition)
-					+ ":",
-				"Add priority item",
-				JOptionPane.PLAIN_MESSAGE,
-				null,
-				copiedResults.toArray(),
-				copiedResults.get(0)
-			);
-
-		if (selected != null)
-		{
-			listener.addCandidateTier(
-				requiredDefinitionId,
-				selected.getExactItemId()
-			);
-		}
+		itemSearchQuery = requiredQuery;
+		itemSearchResults = copiedResults;
+		itemSearchPending = false;
+		itemSearchCompleted = true;
+		refreshItemSearchResults();
 	}
 
 	public void showMessage(String message, boolean error)
@@ -652,11 +715,19 @@ public final class PrioritySlotsPanel extends PluginPanel
 		JPanel content,
 		PriorityDefinition definition)
 	{
+		if (!Objects.equals(
+			itemSearchDefinitionId,
+			definition.getId()))
+		{
+			resetItemSearch(definition.getId());
+		}
+
 		JButton back = new JButton("‹ Back");
 		back.setHorizontalAlignment(SwingConstants.LEFT);
 		back.addActionListener(event ->
 		{
 			selectedDefinitionId = null;
+			resetItemSearch(null);
 			rebuild();
 		});
 		back.setMaximumSize(
@@ -675,9 +746,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 		content.add(Box.createVerticalStrut(8));
 
 		List<PriorityTier> tiers = definition.getTiers();
-
-		CandidateListPanel candidateList =
-			new CandidateListPanel();
+		CandidateListPanel candidateList = new CandidateListPanel();
 
 		for (int index = 0; index < tiers.size(); index++)
 		{
@@ -693,9 +762,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 
 			if (index < tiers.size() - 1)
 			{
-				candidateList.add(
-					Box.createVerticalStrut(5)
-				);
+				candidateList.add(Box.createVerticalStrut(5));
 			}
 		}
 
@@ -704,8 +771,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 			content.add(candidateList);
 			content.add(Box.createVerticalStrut(8));
 		}
-
-		if (tiers.isEmpty())
+		else
 		{
 			content.add(hintLabel(
 				"This definition has no priority items."
@@ -713,15 +779,15 @@ public final class PrioritySlotsPanel extends PluginPanel
 			content.add(Box.createVerticalStrut(8));
 		}
 
-		JButton addItem = new JButton("Add priority item");
-		addItem.addActionListener(event ->
-			promptItemSearch(definition)
-		);
-		addItem.setMaximumSize(
-			new Dimension(Integer.MAX_VALUE, 32)
-		);
-		content.add(addItem);
-		content.add(Box.createVerticalStrut(6));
+		content.add(divider());
+		content.add(Box.createVerticalStrut(8));
+		content.add(sectionLabel("Add priority item"));
+		content.add(Box.createVerticalStrut(4));
+		content.add(itemSearchField);
+		content.add(Box.createVerticalStrut(4));
+		content.add(itemSearchResultsPanel);
+		refreshItemSearchResults();
+		content.add(Box.createVerticalStrut(8));
 
 		JButton addToTag = new JButton("Add to open Bank Tag");
 		addToTag.setEnabled(!tiers.isEmpty());
@@ -1032,39 +1098,233 @@ public final class PrioritySlotsPanel extends PluginPanel
 		);
 	}
 
-	private void promptItemSearch(
-		PriorityDefinition definition)
+
+	private void queueItemSearchTextChanged()
 	{
-		String query = (String) JOptionPane.showInputDialog(
-			this,
-			"Search exact item names:",
-			"Add priority item",
-			JOptionPane.PLAIN_MESSAGE,
-			null,
-			null,
-			""
-		);
-
-		if (query == null)
+		if (suppressItemSearchDocumentEvents
+			|| itemSearchDocumentUpdateQueued)
 		{
 			return;
 		}
 
-		String trimmedQuery = query.trim();
-
-		if (trimmedQuery.length() < 2)
+		itemSearchDocumentUpdateQueued = true;
+		SwingUtilities.invokeLater(() ->
 		{
-			showMessage(
-				"Enter at least two characters to search items.",
-				true
+			itemSearchDocumentUpdateQueued = false;
+
+			if (!suppressItemSearchDocumentEvents)
+			{
+				handleItemSearchTextChanged();
+			}
+		});
+	}
+
+	private void handleItemSearchTextChanged()
+	{
+		itemSearchTimer.stop();
+		itemSearchDefinitionId = selectedDefinitionId;
+		itemSearchQuery = itemSearchField.getText().trim();
+		itemSearchResults = List.of();
+		itemSearchCompleted = false;
+		itemSearchPending = selectedDefinitionId != null
+			&& itemSearchQuery.length() >= MIN_ITEM_SEARCH_LENGTH;
+		refreshItemSearchResults();
+
+		if (itemSearchPending)
+		{
+			itemSearchTimer.restart();
+		}
+	}
+
+	private void submitLiveItemSearch()
+	{
+		String definitionId = selectedDefinitionId;
+		String query = itemSearchField.getText().trim();
+
+		if (definitionId == null
+			|| query.length() < MIN_ITEM_SEARCH_LENGTH
+			|| !Objects.equals(itemSearchDefinitionId, definitionId)
+			|| !query.equals(itemSearchQuery))
+		{
+			return;
+		}
+
+		listener.searchItems(definitionId, query);
+	}
+
+	private void resetItemSearch(String definitionId)
+	{
+		itemSearchTimer.stop();
+		itemSearchDefinitionId = definitionId;
+		itemSearchQuery = "";
+		itemSearchResults = List.of();
+		itemSearchPending = false;
+		itemSearchCompleted = false;
+		suppressItemSearchDocumentEvents = true;
+
+		try
+		{
+			itemSearchField.setText("");
+		}
+		finally
+		{
+			suppressItemSearchDocumentEvents = false;
+		}
+
+		refreshItemSearchResults();
+	}
+
+	private void rebuildPreservingItemSearchFocus()
+	{
+		boolean restoreFocus = itemSearchHasFocus();
+		rebuild();
+
+		if (!restoreFocus || selectedDefinitionId == null)
+		{
+			return;
+		}
+
+		SwingUtilities.invokeLater(() ->
+		{
+			if (selectedDefinitionId != null)
+			{
+				itemSearchField.requestFocusInWindow();
+			}
+		});
+	}
+
+	private boolean itemSearchHasFocus()
+	{
+		Component focusOwner = KeyboardFocusManager
+			.getCurrentKeyboardFocusManager()
+			.getFocusOwner();
+
+		return focusOwner != null
+			&& SwingUtilities.isDescendingFrom(
+				focusOwner,
+				itemSearchField
 			);
+	}
+
+	private void refreshItemSearchResults()
+	{
+		if (!SwingUtilities.isEventDispatchThread())
+		{
+			SwingUtilities.invokeLater(this::refreshItemSearchResults);
 			return;
 		}
 
-		listener.searchItems(
-			definition.getId(),
-			trimmedQuery
+		itemSearchResultsPanel.removeAll();
+
+		PriorityDefinition definition = selectedDefinitionId == null
+			? null
+			: state.definitionsById().get(selectedDefinitionId);
+
+		if (definition == null
+			|| !Objects.equals(
+				itemSearchDefinitionId,
+				definition.getId()))
+		{
+			itemSearchResultsPanel.revalidate();
+			itemSearchResultsPanel.repaint();
+			return;
+		}
+
+		String currentQuery = itemSearchField.getText().trim();
+
+		if (currentQuery.length() < MIN_ITEM_SEARCH_LENGTH)
+		{
+			itemSearchResultsPanel.add(hintLabel(
+				"Type at least two characters."
+			));
+		}
+		else if (itemSearchPending)
+		{
+			itemSearchResultsPanel.add(hintLabel(
+				"Searching exact items…"
+			));
+		}
+		else if (itemSearchCompleted && itemSearchResults.isEmpty())
+		{
+			itemSearchResultsPanel.add(hintLabel(
+				"No exact items found."
+			));
+		}
+
+		for (PriorityItemSearchResult result : itemSearchResults)
+		{
+			if (itemSearchResultsPanel.getComponentCount() > 0)
+			{
+				itemSearchResultsPanel.add(
+					Box.createVerticalStrut(4)
+				);
+			}
+
+			itemSearchResultsPanel.add(buildItemSearchResultRow(
+				definition,
+				result
+			));
+		}
+
+		itemSearchResultsPanel.revalidate();
+		itemSearchResultsPanel.repaint();
+	}
+
+	private JPanel buildItemSearchResultRow(
+		PriorityDefinition definition,
+		PriorityItemSearchResult result)
+	{
+		boolean alreadyAdded = definitionContainsExactItemId(
+			definition,
+			result.getExactItemId()
 		);
+
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		row.setBorder(rowBorder());
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
+		row.add(itemIconLabel(result.getExactItemId()), BorderLayout.WEST);
+
+		JLabel name = new JLabel(
+			"<html><b>" + escapeHtml(result.getName()) + "</b></html>"
+		);
+		name.setForeground(Color.WHITE);
+		name.setVerticalAlignment(SwingConstants.CENTER);
+		row.add(name, BorderLayout.CENTER);
+		row.setToolTipText(
+			"Exact item ID " + result.getExactItemId()
+		);
+
+		JButton add = compactButton(alreadyAdded ? "Added" : "+");
+		add.setEnabled(!alreadyAdded);
+		add.setToolTipText(
+			alreadyAdded
+				? "This exact item is already in the definition"
+				: "Add as the lowest-priority item"
+		);
+		add.addActionListener(event ->
+			listener.addCandidateTier(
+				definition.getId(),
+				result.getExactItemId()
+			)
+		);
+		row.add(add, BorderLayout.EAST);
+		return row;
+	}
+
+	private static boolean definitionContainsExactItemId(
+		PriorityDefinition definition,
+		int exactItemId)
+	{
+		for (PriorityTier tier : definition.getTiers())
+		{
+			if (tier.getExactItemIds().contains(exactItemId))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private void confirmDeleteDefinition(
@@ -1233,6 +1493,15 @@ public final class PrioritySlotsPanel extends PluginPanel
 			"<html>" + escapeHtml(text) + "</html>"
 		);
 		label.setForeground(Color.LIGHT_GRAY);
+		return label;
+	}
+
+	private static JLabel sectionLabel(String text)
+	{
+		JLabel label = new JLabel(
+			"<html><b>" + escapeHtml(text) + "</b></html>"
+		);
+		label.setForeground(Color.WHITE);
 		return label;
 	}
 

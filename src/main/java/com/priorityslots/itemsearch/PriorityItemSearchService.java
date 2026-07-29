@@ -14,10 +14,11 @@ import net.runelite.client.game.ItemManager;
 @Singleton
 public final class PriorityItemSearchService
 {
-	private static final int DEFAULT_MAX_RESULTS = 50;
+	private static final int DEFAULT_MAX_RESULTS = 12;
 	private static final String UNKNOWN_ITEM_NAME = "null";
 
 	private final ItemSource itemSource;
+	private List<IndexedItem> itemIndex;
 
 	@Inject
 	public PriorityItemSearchService(
@@ -59,9 +60,10 @@ public final class PriorityItemSearchService
 	}
 
 	/**
-	 * Searches exact item definitions without canonicalizing IDs. The caller
-	 * must invoke this method through ClientThread because the production item
-	 * source reads Client item definitions.
+	 * Searches exact item definitions without canonicalizing IDs. The first
+	 * search builds an exact-item index; later live searches only filter that
+	 * immutable index. The caller must invoke this method through ClientThread
+	 * because index construction reads Client item definitions.
 	 */
 	public List<PriorityItemSearchResult> search(String query)
 	{
@@ -71,6 +73,96 @@ public final class PriorityItemSearchService
 	List<PriorityItemSearchResult> search(
 		String query,
 		int maxResults)
+	{
+		String normalizedQuery = normalizeQuery(query);
+
+		if (maxResults <= 0)
+		{
+			throw new IllegalArgumentException(
+				"maxResults must be positive"
+			);
+		}
+
+		ensureIndex();
+
+		List<IndexedItem> matches = new ArrayList<>();
+
+		for (IndexedItem item : itemIndex)
+		{
+			if (item.normalizedName.contains(normalizedQuery))
+			{
+				matches.add(item);
+			}
+		}
+
+		matches.sort(
+			Comparator
+				.comparing((IndexedItem item) ->
+					!item.normalizedName.startsWith(normalizedQuery))
+				.thenComparing(item -> item.normalizedName)
+				.thenComparingInt(item -> item.exactItemId)
+		);
+
+		int resultCount = Math.min(matches.size(), maxResults);
+		List<PriorityItemSearchResult> results =
+			new ArrayList<>(resultCount);
+
+		for (int index = 0; index < resultCount; index++)
+		{
+			IndexedItem item = matches.get(index);
+			results.add(new PriorityItemSearchResult(
+				item.exactItemId,
+				item.name
+			));
+		}
+
+		return List.copyOf(results);
+	}
+
+	private void ensureIndex()
+	{
+		if (itemIndex != null)
+		{
+			return;
+		}
+
+		List<IndexedItem> indexedItems = new ArrayList<>();
+		int itemCount = itemSource.itemCount();
+
+		for (int exactItemId = 1;
+			exactItemId < itemCount;
+			exactItemId++)
+		{
+			ItemDescriptor descriptor = itemSource.item(exactItemId);
+
+			if (descriptor == null
+				|| descriptor.noted
+				|| descriptor.placeholder
+				|| descriptor.name == null)
+			{
+				continue;
+			}
+
+			String name = descriptor.name.trim();
+			String normalizedName = name.toLowerCase(Locale.ROOT);
+
+			if (name.isEmpty()
+				|| UNKNOWN_ITEM_NAME.equals(normalizedName))
+			{
+				continue;
+			}
+
+			indexedItems.add(new IndexedItem(
+				exactItemId,
+				name,
+				normalizedName
+			));
+		}
+
+		itemIndex = List.copyOf(indexedItems);
+	}
+
+	private static String normalizeQuery(String query)
 	{
 		String normalizedQuery = Objects.requireNonNull(
 			query,
@@ -84,77 +176,7 @@ public final class PriorityItemSearchService
 			);
 		}
 
-		if (maxResults <= 0)
-		{
-			throw new IllegalArgumentException(
-				"maxResults must be positive"
-			);
-		}
-
-		List<PriorityItemSearchResult> matches =
-			new ArrayList<>();
-
-		int itemCount = itemSource.itemCount();
-
-		for (int exactItemId = 1;
-			exactItemId < itemCount;
-			exactItemId++)
-		{
-			ItemDescriptor descriptor =
-				itemSource.item(exactItemId);
-
-			if (descriptor == null
-				|| descriptor.noted
-				|| descriptor.placeholder)
-			{
-				continue;
-			}
-
-			String name = descriptor.name;
-
-			if (name == null)
-			{
-				continue;
-			}
-
-			String trimmedName = name.trim();
-			String normalizedName =
-				trimmedName.toLowerCase(Locale.ROOT);
-
-			if (trimmedName.isEmpty()
-				|| UNKNOWN_ITEM_NAME.equals(normalizedName)
-				|| !normalizedName.contains(normalizedQuery))
-			{
-				continue;
-			}
-
-			matches.add(new PriorityItemSearchResult(
-				exactItemId,
-				trimmedName
-			));
-		}
-
-		matches.sort(
-			Comparator
-				.comparing((PriorityItemSearchResult result) ->
-					!result.getName()
-						.toLowerCase(Locale.ROOT)
-						.startsWith(normalizedQuery))
-				.thenComparing(
-					result -> result.getName()
-						.toLowerCase(Locale.ROOT)
-				)
-				.thenComparingInt(
-					PriorityItemSearchResult::getExactItemId
-				)
-		);
-
-		if (matches.size() > maxResults)
-		{
-			return List.copyOf(matches.subList(0, maxResults));
-		}
-
-		return List.copyOf(matches);
+		return normalizedQuery;
 	}
 
 	interface ItemSource
@@ -178,6 +200,23 @@ public final class PriorityItemSearchService
 			this.name = name;
 			this.noted = noted;
 			this.placeholder = placeholder;
+		}
+	}
+
+	private static final class IndexedItem
+	{
+		private final int exactItemId;
+		private final String name;
+		private final String normalizedName;
+
+		private IndexedItem(
+			int exactItemId,
+			String name,
+			String normalizedName)
+		{
+			this.exactItemId = exactItemId;
+			this.name = name;
+			this.normalizedName = normalizedName;
 		}
 	}
 }

@@ -3,6 +3,7 @@ package com.priorityslots.itemsearch;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.junit.Test;
 
@@ -61,6 +62,42 @@ public class PriorityItemSearchServiceTest
 				.map(PriorityItemSearchResult::getExactItemId)
 				.collect(Collectors.toList())
 		);
+	}
+
+	@Test
+	public void buildsExactItemIndexOnlyOnceForLiveQueries()
+	{
+		Map<Integer, PriorityItemSearchService.ItemDescriptor> items =
+			Map.of(
+				1, item("Lantadyme"),
+				2, item("Cadantine")
+			);
+		AtomicInteger itemReads = new AtomicInteger();
+
+		PriorityItemSearchService service =
+			new PriorityItemSearchService(
+				new PriorityItemSearchService.ItemSource()
+				{
+					@Override
+					public int itemCount()
+					{
+						return 3;
+					}
+
+					@Override
+					public PriorityItemSearchService.ItemDescriptor item(
+						int exactItemId)
+					{
+						itemReads.incrementAndGet();
+						return items.get(exactItemId);
+					}
+				}
+			);
+
+		service.search("lan");
+		service.search("cad");
+
+		assertEquals(2, itemReads.get());
 	}
 
 	@Test
