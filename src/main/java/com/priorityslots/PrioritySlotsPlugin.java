@@ -358,10 +358,50 @@ public class PrioritySlotsPlugin extends Plugin
 				{
 
 					@Override
-					public void createDefinition(String name)
+					public void createDefinition(
+						String name,
+						String parentGroupId,
+						int targetIndex)
 					{
 						invokeOnClientThreadWhileActive(() ->
-							createDefinitionFromPanel(name)
+							createDefinitionFromPanel(
+								name,
+								parentGroupId,
+								targetIndex
+							)
+						);
+					}
+
+					@Override
+					public void createGroup(
+						String name,
+						String parentGroupId,
+						int targetIndex)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							createGroupFromPanel(
+								name,
+								parentGroupId,
+								targetIndex
+							)
+						);
+					}
+
+					@Override
+					public void renameGroup(
+						String groupId,
+						String name)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							renameGroupFromPanel(groupId, name)
+						);
+					}
+
+					@Override
+					public void deleteGroup(String groupId)
+					{
+						invokeOnClientThreadWhileActive(() ->
+							deleteGroupFromPanel(groupId)
 						);
 					}
 
@@ -506,7 +546,10 @@ public class PrioritySlotsPlugin extends Plugin
 	}
 
 
-	private void createDefinitionFromPanel(String name)
+	private void createDefinitionFromPanel(
+		String name,
+		String parentGroupId,
+		int targetIndex)
 	{
 		try
 		{
@@ -515,8 +558,8 @@ public class PrioritySlotsPlugin extends Plugin
 					priorityState,
 					name,
 					List.of(),
-					null,
-					priorityState.getRootEntries().size()
+					parentGroupId,
+					targetIndex
 				);
 
 			applyAuthoringState(result.getState());
@@ -532,6 +575,89 @@ public class PrioritySlotsPlugin extends Plugin
 		{
 			showAuthoringFailure(
 				"Unable to create definition",
+				exception
+			);
+		}
+	}
+
+	private void createGroupFromPanel(
+		String name,
+		String parentGroupId,
+		int targetIndex)
+	{
+		try
+		{
+			PrioritySlotAuthoringService.CreateGroupResult result =
+				authoringService.createGroup(
+					priorityState,
+					name,
+					parentGroupId,
+					targetIndex
+				);
+
+			applyAuthoringState(result.getState());
+			prioritySlotsPanel.showMessage(
+				"Created group " + result.getGroup().getName() + ".",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to create group",
+				exception
+			);
+		}
+	}
+
+	private void renameGroupFromPanel(
+		String groupId,
+		String name)
+	{
+		try
+		{
+			applyAuthoringState(
+				authoringService.renameGroup(
+					priorityState,
+					groupId,
+					name
+				)
+			);
+
+			prioritySlotsPanel.showMessage(
+				"Group renamed.",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to rename group",
+				exception
+			);
+		}
+	}
+
+	private void deleteGroupFromPanel(String groupId)
+	{
+		try
+		{
+			applyAuthoringState(
+				authoringService.deleteGroup(
+					priorityState,
+					groupId
+				)
+			);
+
+			prioritySlotsPanel.showMessage(
+				"Group deleted.",
+				false
+			);
+		}
+		catch (RuntimeException exception)
+		{
+			showAuthoringFailure(
+				"Unable to delete group",
 				exception
 			);
 		}

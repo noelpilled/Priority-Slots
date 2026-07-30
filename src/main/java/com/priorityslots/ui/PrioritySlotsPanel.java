@@ -15,6 +15,8 @@ import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.KeyboardFocusManager;
 import java.awt.Point;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
@@ -49,6 +51,7 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.ui.components.FlatTextField;
 import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.util.AsyncBufferedImage;
 
@@ -73,7 +76,30 @@ public final class PrioritySlotsPanel extends PluginPanel
 		{
 
 			@Override
-			public void createDefinition(String name)
+			public void createDefinition(
+				String name,
+				String parentGroupId,
+				int targetIndex)
+			{
+			}
+
+			@Override
+			public void createGroup(
+				String name,
+				String parentGroupId,
+				int targetIndex)
+			{
+			}
+
+			@Override
+			public void renameGroup(
+				String groupId,
+				String name)
+			{
+			}
+
+			@Override
+			public void deleteGroup(String groupId)
 			{
 			}
 
@@ -146,8 +172,14 @@ public final class PrioritySlotsPanel extends PluginPanel
 	private final JLabel statusLabel = new JLabel(" ");
 	private final Set<String> collapsedGroupIds =
 		new HashSet<>();
+	private final FlatTextField libraryNameField =
+		new FlatTextField();
+	private final JPanel libraryEntriesPanel = new JPanel();
 
 	private volatile Listener listener = NOOP_LISTENER;
+	private LibraryEditMode libraryEditMode;
+	private String libraryEditParentGroupId;
+	private String libraryEditTargetGroupId;
 	private PriorityState state = PriorityState.empty();
 	private String selectedDefinitionId;
 	private final IconTextField itemSearchField =
@@ -239,6 +271,41 @@ public final class PrioritySlotsPanel extends PluginPanel
 			}
 		);
 
+		libraryNameField.setBackground(
+			ColorScheme.DARKER_GRAY_COLOR
+		);
+		libraryNameField.setHoverBackgroundColor(
+			ColorScheme.MEDIUM_GRAY_COLOR
+		);
+		libraryNameField.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, 30)
+		);
+		libraryNameField.addActionListener(
+			event -> submitLibraryEdit()
+		);
+		libraryNameField.getTextField().addKeyListener(
+			new KeyAdapter()
+			{
+				@Override
+				public void keyPressed(KeyEvent event)
+				{
+					if (event.getKeyCode() == KeyEvent.VK_ESCAPE)
+					{
+						cancelLibraryEdit();
+					}
+				}
+			}
+		);
+
+		libraryEntriesPanel.setOpaque(false);
+		libraryEntriesPanel.setLayout(
+			new BoxLayout(libraryEntriesPanel, BoxLayout.Y_AXIS)
+		);
+		libraryEntriesPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		libraryEntriesPanel.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE)
+		);
+
 		statusLabel.setForeground(Color.LIGHT_GRAY);
 		statusLabel.setBorder(new EmptyBorder(6, 2, 0, 2));
 
@@ -279,6 +346,14 @@ public final class PrioritySlotsPanel extends PluginPanel
 		}
 
 		this.state = requiredState;
+		collapsedGroupIds.retainAll(
+			requiredState.groupsById().keySet()
+		);
+
+		if (!libraryEditStillValid())
+		{
+			clearLibraryEditState();
+		}
 
 		if (selectedDefinitionId != null
 			&& !state.definitionsById().containsKey(
@@ -454,37 +529,104 @@ public final class PrioritySlotsPanel extends PluginPanel
 		));
 		content.add(Box.createVerticalStrut(8));
 
-		JButton createDefinition = new JButton("New definition");
-		createDefinition.addActionListener(event ->
-			promptCreateDefinition()
+		JPanel createActions = new JPanel(
+			new java.awt.GridLayout(1, 2, 4, 0)
 		);
-		createDefinition.setMaximumSize(
+		createActions.setOpaque(false);
+		createActions.setMaximumSize(
 			new Dimension(Integer.MAX_VALUE, 32)
 		);
-		content.add(createDefinition);
+
+		JButton createDefinition = new JButton("New definition");
+		createDefinition.addActionListener(event ->
+			beginCreateDefinition(null)
+		);
+		createActions.add(createDefinition);
+
+		JButton createGroup = new JButton("New group");
+		createGroup.addActionListener(event ->
+			beginCreateGroup(null)
+		);
+		createActions.add(createGroup);
+
+		content.add(createActions);
 		content.add(Box.createVerticalStrut(8));
 		content.add(divider());
 		content.add(Box.createVerticalStrut(8));
 
-		if (state.getRootEntries().isEmpty())
+		/*
+		 * Refresh only the mutable library area so the header does not flicker.
+		 * Group expansion previously rebuilt the wrapped introductory label.
+		 */
+		refreshLibraryEntries(false);
+		content.add(libraryEntriesPanel);
+	}
+
+	private void refreshLibraryEntries(boolean preserveViewPosition)
+	{
+		if (!SwingUtilities.isEventDispatchThread())
 		{
-			content.add(hintLabel(
-				"No priority definitions have been saved."
-			));
-			content.add(statusLabel);
+			SwingUtilities.invokeLater(() ->
+				refreshLibraryEntries(preserveViewPosition)
+			);
 			return;
 		}
 
-		Set<String> visitedGroups = new HashSet<>();
-		addLibraryEntries(
-			content,
-			state.getRootEntries(),
-			null,
+		Point previousViewPosition = preserveViewPosition
+			? getScrollPane().getViewport().getViewPosition()
+			: null;
+
+		libraryEntriesPanel.removeAll();
+
+		if (isCreatingIn(null))
+		{
+			libraryEntriesPanel.add(buildLibraryNameEditor());
+			libraryEntriesPanel.add(Box.createVerticalStrut(6));
+		}
+
+		if (state.getRootEntries().isEmpty() && !isCreatingIn(null))
+		{
+			libraryEntriesPanel.add(hintLabel(
+				"No priority definitions or groups have been saved."
+			));
+		}
+		else
+		{
+			addLibraryEntries(
+				libraryEntriesPanel,
+				state.getRootEntries(),
+				null,
+				0,
+				new HashSet<>()
+			);
+		}
+
+		libraryEntriesPanel.add(statusLabel);
+		libraryEntriesPanel.revalidate();
+		libraryEntriesPanel.repaint();
+
+		if (previousViewPosition != null)
+		{
+			SwingUtilities.invokeLater(() ->
+				restoreLibraryViewPosition(previousViewPosition)
+			);
+		}
+	}
+
+	private void restoreLibraryViewPosition(Point previousViewPosition)
+	{
+		int maximumY = Math.max(
 			0,
-			visitedGroups
+			getScrollPane().getViewport().getViewSize().height
+				- getScrollPane().getViewport().getExtentSize().height
 		);
 
-		content.add(statusLabel);
+		getScrollPane().getViewport().setViewPosition(
+			new Point(
+				previousViewPosition.x,
+				Math.min(previousViewPosition.y, maximumY)
+			)
+		);
 	}
 
 	private void addLibraryEntries(
@@ -515,30 +657,51 @@ public final class PrioritySlotsPanel extends PluginPanel
 					continue;
 				}
 
-				content.add(
+				/*
+				 * Keep sibling rows mounted while toggling a group subtree.
+				 * Only this child container changes visibility, so wrapped
+				 * definition labels below it are not reconstructed.
+				 */
+				JPanel groupSection = verticalLibraryPanel();
+				JPanel childrenPanel = verticalLibraryPanel();
+				childrenPanel.setVisible(
+					!collapsedGroupIds.contains(group.getId())
+				);
+
+				groupSection.add(
 					indent(
 						buildGroupHeader(
 							group,
 							parentGroupId,
 							index,
-							entries.size()
+							entries.size(),
+							childrenPanel
 						),
 						depth
 					)
 				);
-				content.add(Box.createVerticalStrut(3));
+				groupSection.add(Box.createVerticalStrut(3));
 
-				if (!collapsedGroupIds.contains(group.getId()))
+				if (isCreatingIn(group.getId()))
 				{
-					addLibraryEntries(
-						content,
-						group.getChildren(),
-						group.getId(),
-						depth + 1,
-						visitedGroups
+					groupSection.add(
+						indent(
+							buildLibraryNameEditor(),
+							depth + 1
+						)
 					);
+					groupSection.add(Box.createVerticalStrut(4));
 				}
 
+				addLibraryEntries(
+					childrenPanel,
+					group.getChildren(),
+					group.getId(),
+					depth + 1,
+					visitedGroups
+				);
+				groupSection.add(childrenPanel);
+				content.add(groupSection);
 				continue;
 			}
 
@@ -565,12 +728,30 @@ public final class PrioritySlotsPanel extends PluginPanel
 		}
 	}
 
+	private static JPanel verticalLibraryPanel()
+	{
+		JPanel panel = new JPanel();
+		panel.setOpaque(false);
+		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		panel.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE)
+		);
+		return panel;
+	}
+
 	private JPanel buildGroupHeader(
 		PriorityGroup group,
 		String parentGroupId,
 		int index,
-		int siblingCount)
+		int siblingCount,
+		JPanel childrenPanel)
 	{
+		if (isRenamingGroup(group.getId()))
+		{
+			return buildLibraryNameEditor();
+		}
+
 		boolean collapsed = collapsedGroupIds.contains(
 			group.getId()
 		);
@@ -586,16 +767,30 @@ public final class PrioritySlotsPanel extends PluginPanel
 		toggle.setToolTipText(collapsed ? "Expand" : "Collapse");
 		toggle.addActionListener(event ->
 		{
-			if (collapsed)
+			Point previousViewPosition =
+				getScrollPane().getViewport().getViewPosition();
+			boolean collapse = childrenPanel.isVisible();
+
+			if (collapse)
 			{
-				collapsedGroupIds.remove(group.getId());
+				collapsedGroupIds.add(group.getId());
+				childrenPanel.setVisible(false);
+				toggle.setText("▸");
+				toggle.setToolTipText("Expand");
 			}
 			else
 			{
-				collapsedGroupIds.add(group.getId());
+				collapsedGroupIds.remove(group.getId());
+				childrenPanel.setVisible(true);
+				toggle.setText("▾");
+				toggle.setToolTipText("Collapse");
 			}
 
-			rebuild();
+			libraryEntriesPanel.revalidate();
+			libraryEntriesPanel.repaint();
+			SwingUtilities.invokeLater(() ->
+				restoreLibraryViewPosition(previousViewPosition)
+			);
 		});
 		row.add(toggle, BorderLayout.WEST);
 
@@ -618,6 +813,41 @@ public final class PrioritySlotsPanel extends PluginPanel
 			index,
 			siblingCount
 		);
+
+		JMenuItem newDefinition =
+			new JMenuItem("New definition here");
+		newDefinition.addActionListener(event ->
+			beginCreateDefinition(group.getId())
+		);
+		menu.insert(newDefinition, 0);
+
+		JMenuItem newSubgroup =
+			new JMenuItem("New subgroup here");
+		newSubgroup.addActionListener(event ->
+			beginCreateGroup(group.getId())
+		);
+		menu.insert(newSubgroup, 1);
+		menu.insert(new JSeparator(), 2);
+		menu.add(new JSeparator());
+
+		JMenuItem rename = new JMenuItem("Rename group");
+		rename.addActionListener(event ->
+			beginRenameGroup(group)
+		);
+		menu.add(rename);
+
+		JMenuItem delete = new JMenuItem("Delete group");
+		delete.setEnabled(group.getChildren().isEmpty());
+		delete.setToolTipText(
+			group.getChildren().isEmpty()
+				? "Delete this empty group"
+				: "Move or delete every item in this group first"
+		);
+		delete.addActionListener(event ->
+			confirmDeleteGroup(group)
+		);
+		menu.add(delete);
+
 		setPopupRecursively(row, menu);
 
 		return row;
@@ -1038,32 +1268,233 @@ public final class PrioritySlotsPanel extends PluginPanel
 	}
 
 
-	private void promptCreateDefinition()
+	private void beginCreateDefinition(String parentGroupId)
 	{
-		String name = (String) JOptionPane.showInputDialog(
-			this,
-			"Definition name:",
-			"New priority definition",
-			JOptionPane.PLAIN_MESSAGE,
-			null,
+		startLibraryEdit(
+			LibraryEditMode.CREATE_DEFINITION,
+			parentGroupId,
 			null,
 			""
 		);
+	}
 
-		if (name == null)
+	private void beginCreateGroup(String parentGroupId)
+	{
+		startLibraryEdit(
+			LibraryEditMode.CREATE_GROUP,
+			parentGroupId,
+			null,
+			""
+		);
+	}
+
+	private void beginRenameGroup(PriorityGroup group)
+	{
+		startLibraryEdit(
+			LibraryEditMode.RENAME_GROUP,
+			null,
+			group.getId(),
+			group.getName()
+		);
+	}
+
+	private void startLibraryEdit(
+		LibraryEditMode mode,
+		String parentGroupId,
+		String targetGroupId,
+		String initialName)
+	{
+		libraryEditMode = Objects.requireNonNull(mode, "mode");
+		libraryEditParentGroupId = parentGroupId;
+		libraryEditTargetGroupId = targetGroupId;
+		libraryNameField.setText(initialName);
+
+		if (parentGroupId != null)
+		{
+			collapsedGroupIds.remove(parentGroupId);
+		}
+
+		refreshLibraryEntries(true);
+		focusLibraryNameField(true);
+	}
+
+	private JPanel buildLibraryNameEditor()
+	{
+		JPanel row = new JPanel(new BorderLayout(5, 0));
+		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		row.setBorder(boxBorder());
+		row.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, 38)
+		);
+
+		String labelText =
+			libraryEditMode == LibraryEditMode.CREATE_DEFINITION
+				? "Definition"
+				: "Group";
+
+		JLabel label = new JLabel(labelText);
+		label.setForeground(Color.LIGHT_GRAY);
+		row.add(label, BorderLayout.WEST);
+		row.add(libraryNameField, BorderLayout.CENTER);
+
+		JPanel actions = new JPanel(
+			new FlowLayout(FlowLayout.RIGHT, 3, 0)
+		);
+		actions.setOpaque(false);
+
+		JButton save = compactButton("✓");
+		save.setToolTipText("Save");
+		save.addActionListener(event -> submitLibraryEdit());
+		actions.add(save);
+
+		JButton cancel = compactButton("×");
+		cancel.setToolTipText("Cancel");
+		cancel.addActionListener(event -> cancelLibraryEdit());
+		actions.add(cancel);
+
+		row.add(actions, BorderLayout.EAST);
+		return row;
+	}
+
+	private void submitLibraryEdit()
+	{
+		LibraryEditMode mode = libraryEditMode;
+
+		if (mode == null)
 		{
 			return;
 		}
 
-		String trimmedName = name.trim();
+		String name = libraryNameField.getText().trim();
 
-		if (trimmedName.isEmpty())
+		if (name.isEmpty())
 		{
-			showMessage("Definition name must not be blank.", true);
+			showMessage(
+				(mode == LibraryEditMode.CREATE_DEFINITION
+					? "Definition"
+					: "Group")
+					+ " name must not be blank.",
+				true
+			);
+			focusLibraryNameField(false);
 			return;
 		}
 
-		listener.createDefinition(trimmedName);
+		String parentGroupId = libraryEditParentGroupId;
+		String targetGroupId = libraryEditTargetGroupId;
+		clearLibraryEditState();
+		refreshLibraryEntries(true);
+
+		switch (mode)
+		{
+			case CREATE_DEFINITION:
+				listener.createDefinition(
+					name,
+					parentGroupId,
+					0
+				);
+				break;
+			case CREATE_GROUP:
+				listener.createGroup(
+					name,
+					parentGroupId,
+					0
+				);
+				break;
+			case RENAME_GROUP:
+				listener.renameGroup(targetGroupId, name);
+				break;
+			default:
+				throw new IllegalStateException(
+					"Unknown library edit mode: " + mode
+				);
+		}
+	}
+
+	private void cancelLibraryEdit()
+	{
+		if (libraryEditMode == null)
+		{
+			return;
+		}
+
+		clearLibraryEditState();
+		refreshLibraryEntries(true);
+	}
+
+	private void clearLibraryEditState()
+	{
+		libraryEditMode = null;
+		libraryEditParentGroupId = null;
+		libraryEditTargetGroupId = null;
+		libraryNameField.setText("");
+	}
+
+	private boolean isCreatingIn(String parentGroupId)
+	{
+		return (libraryEditMode == LibraryEditMode.CREATE_DEFINITION
+			|| libraryEditMode == LibraryEditMode.CREATE_GROUP)
+			&& Objects.equals(
+				libraryEditParentGroupId,
+				parentGroupId
+			);
+	}
+
+	private boolean isRenamingGroup(String groupId)
+	{
+		return libraryEditMode == LibraryEditMode.RENAME_GROUP
+			&& Objects.equals(libraryEditTargetGroupId, groupId);
+	}
+
+	private boolean libraryEditStillValid()
+	{
+		if (libraryEditMode == null)
+		{
+			return true;
+		}
+
+		if (libraryEditMode == LibraryEditMode.RENAME_GROUP)
+		{
+			return state.groupsById().containsKey(
+				libraryEditTargetGroupId
+			);
+		}
+
+		return libraryEditParentGroupId == null
+			|| state.groupsById().containsKey(
+				libraryEditParentGroupId
+			);
+	}
+
+	private void focusLibraryNameField(boolean selectAll)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			if (libraryEditMode == null)
+			{
+				return;
+			}
+
+			libraryNameField.requestFocusInWindow();
+
+			if (selectAll)
+			{
+				libraryNameField.getTextField().selectAll();
+			}
+		});
+	}
+
+	private boolean libraryNameHasFocus()
+	{
+		Component focusOwner = KeyboardFocusManager
+			.getCurrentKeyboardFocusManager()
+			.getFocusOwner();
+
+		return focusOwner != null
+			&& SwingUtilities.isDescendingFrom(
+				focusOwner,
+				libraryNameField
+			);
 	}
 
 	private void promptRenameDefinition(
@@ -1176,10 +1607,17 @@ public final class PrioritySlotsPanel extends PluginPanel
 
 	private void rebuildPreservingItemSearchFocus()
 	{
-		boolean restoreFocus = itemSearchHasFocus();
+		boolean restoreItemSearchFocus = itemSearchHasFocus();
+		boolean restoreLibraryNameFocus = libraryNameHasFocus();
 		rebuild();
 
-		if (!restoreFocus || selectedDefinitionId == null)
+		if (restoreLibraryNameFocus && libraryEditMode != null)
+		{
+			focusLibraryNameField(false);
+			return;
+		}
+
+		if (!restoreItemSearchFocus || selectedDefinitionId == null)
 		{
 			return;
 		}
@@ -1327,6 +1765,32 @@ public final class PrioritySlotsPanel extends PluginPanel
 		return false;
 	}
 
+	private void confirmDeleteGroup(PriorityGroup group)
+	{
+		if (!group.getChildren().isEmpty())
+		{
+			showMessage(
+				"Move or delete every item in this group first.",
+				true
+			);
+			return;
+		}
+
+		int choice = JOptionPane.showConfirmDialog(
+			this,
+			"Delete group \"" + group.getName() + "\"?",
+			"Delete priority group",
+			JOptionPane.OK_CANCEL_OPTION,
+			JOptionPane.WARNING_MESSAGE
+		);
+
+		if (choice == JOptionPane.OK_OPTION)
+		{
+			collapsedGroupIds.remove(group.getId());
+			listener.deleteGroup(group.getId());
+		}
+	}
+
 	private void confirmDeleteDefinition(
 		PriorityDefinition definition)
 	{
@@ -1460,6 +1924,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 	{
 		JPanel wrapper = new JPanel(new BorderLayout());
 		wrapper.setOpaque(false);
+		wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
 		wrapper.setBorder(new EmptyBorder(
 			0,
 			depth * INDENT_WIDTH,
@@ -1609,9 +2074,30 @@ public final class PrioritySlotsPanel extends PluginPanel
 			.replace(">", "&gt;");
 	}
 
+	private enum LibraryEditMode
+	{
+		CREATE_DEFINITION,
+		CREATE_GROUP,
+		RENAME_GROUP
+	}
+
 	public interface Listener
 	{
-		void createDefinition(String name);
+		void createDefinition(
+			String name,
+			String parentGroupId,
+			int targetIndex);
+
+		void createGroup(
+			String name,
+			String parentGroupId,
+			int targetIndex);
+
+		void renameGroup(
+			String groupId,
+			String name);
+
+		void deleteGroup(String groupId);
 
 		void renameDefinition(
 			String definitionId,

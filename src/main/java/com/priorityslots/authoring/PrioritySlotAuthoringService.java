@@ -84,6 +84,73 @@ public final class PrioritySlotAuthoringService
 		return new CreateGroupResult(moved, group);
 	}
 
+	public PriorityState renameGroup(
+		PriorityState state,
+		String groupId,
+		String name)
+	{
+		Objects.requireNonNull(state, "state");
+
+		PriorityGroup group = requireGroup(state, groupId);
+
+		return replaceGroup(
+			state,
+			group,
+			group.withName(requireNonBlank(name, "name"))
+		);
+	}
+
+	public PriorityState deleteGroup(
+		PriorityState state,
+		String groupId)
+	{
+		Objects.requireNonNull(state, "state");
+
+		PriorityGroup group = requireGroup(state, groupId);
+
+		if (!group.getChildren().isEmpty())
+		{
+			throw new IllegalArgumentException(
+				"Move or delete every item in this group before deleting it"
+			);
+		}
+
+		PriorityLibraryEntry libraryEntry =
+			PriorityLibraryEntry.group(group.getId());
+
+		List<PriorityLibraryEntry> rootEntries =
+			new ArrayList<>(state.getRootEntries());
+		rootEntries.remove(libraryEntry);
+
+		List<PriorityGroup> groups = new ArrayList<>();
+
+		for (PriorityGroup existingGroup : state.getGroups())
+		{
+			if (existingGroup.equals(group))
+			{
+				continue;
+			}
+
+			if (!existingGroup.getChildren().contains(libraryEntry))
+			{
+				groups.add(existingGroup);
+				continue;
+			}
+
+			List<PriorityLibraryEntry> children =
+				new ArrayList<>(existingGroup.getChildren());
+			children.remove(libraryEntry);
+			groups.add(existingGroup.withChildren(children));
+		}
+
+		return new PriorityState(
+			state.getDefinitions(),
+			groups,
+			state.getBindings(),
+			rootEntries
+		);
+	}
+
 	public CreateDefinitionResult createDefinition(
 		PriorityState state,
 		String name,
@@ -760,6 +827,46 @@ public final class PrioritySlotAuthoringService
 		return null;
 	}
 
+
+	private static PriorityGroup requireGroup(
+		PriorityState state,
+		String groupId)
+	{
+		String requiredGroupId = requireNonBlank(
+			groupId,
+			"groupId"
+		);
+
+		PriorityGroup group =
+			state.groupsById().get(requiredGroupId);
+
+		if (group == null)
+		{
+			throw new IllegalArgumentException(
+				"Unknown group: " + requiredGroupId
+			);
+		}
+
+		return group;
+	}
+
+	private static PriorityState replaceGroup(
+		PriorityState state,
+		PriorityGroup previous,
+		PriorityGroup updated)
+	{
+		List<PriorityGroup> groups =
+			new ArrayList<>(state.getGroups());
+
+		groups.set(groups.indexOf(previous), updated);
+
+		return new PriorityState(
+			state.getDefinitions(),
+			groups,
+			state.getBindings(),
+			state.getRootEntries()
+		);
+	}
 
 	private static PriorityDefinition requireDefinition(
 		PriorityState state,
