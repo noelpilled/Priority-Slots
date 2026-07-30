@@ -15,42 +15,6 @@ public class PriorityDefinitionPresentationTest
 	private static final int DWARF_WEED = 1004;
 
 	@Test
-	public void replacesTechnicalMvpNameWithPrimaryItemName()
-	{
-		PriorityDefinition definition = definition(
-			"MVP repeatables slot 0",
-			LANTADYME,
-			CADANTINE
-		);
-
-		assertEquals(
-			"Grimy lantadyme priority",
-			PriorityDefinitionPresentation.displayName(
-				definition,
-				PriorityDefinitionPresentationTest::itemName
-			)
-		);
-	}
-
-	@Test
-	public void preservesUserFacingDefinitionName()
-	{
-		PriorityDefinition definition = definition(
-			"Grimy herbs",
-			LANTADYME,
-			CADANTINE
-		);
-
-		assertEquals(
-			"Grimy herbs",
-			PriorityDefinitionPresentation.displayName(
-				definition,
-				PriorityDefinitionPresentationTest::itemName
-			)
-		);
-	}
-
-	@Test
 	public void previewIncludesFirstTwoPriorityItems()
 	{
 		PriorityDefinition definition = definition(

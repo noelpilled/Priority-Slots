@@ -50,7 +50,7 @@ public class BankTagManagedItemsTest
 		);
 
 		PriorityState state =
-				new PriorityState(
+				com.priorityslots.testing.PriorityStateFixtures.state(
 						List.of(definition),
 						List.of(),
 						List.of(binding)
@@ -89,7 +89,7 @@ public class BankTagManagedItemsTest
 		Set<Integer> managedItemIds =
 				BankTagManagedItems.collect(
 						binding,
-						new PriorityState(
+						com.priorityslots.testing.PriorityStateFixtures.state(
 								List.of(),
 								List.of(),
 								List.of(binding)

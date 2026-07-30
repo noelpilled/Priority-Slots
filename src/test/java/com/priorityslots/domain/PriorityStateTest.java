@@ -74,38 +74,6 @@ public class PriorityStateTest
 	}
 
 	@Test
-	public void threeArgumentConstructorDerivesRootTree()
-	{
-		PriorityDefinition grouped =
-			createDefinition("definition-grouped");
-		PriorityDefinition ungrouped =
-			createDefinition("definition-root");
-		PriorityGroup group = new PriorityGroup(
-			"group-1",
-			"Group",
-			List.of(
-				PriorityLibraryEntry.definition(grouped.getId())
-			)
-		);
-
-		PriorityState state = new PriorityState(
-			List.of(grouped, ungrouped),
-			List.of(group),
-			List.of()
-		);
-
-		assertEquals(
-			List.of(
-				PriorityLibraryEntry.group(group.getId()),
-				PriorityLibraryEntry.definition(
-					ungrouped.getId()
-				)
-			),
-			state.getRootEntries()
-		);
-	}
-
-	@Test
 	public void supportsNestedGroups()
 	{
 		PriorityDefinition definition =
@@ -253,7 +221,7 @@ public class PriorityStateTest
 			createDefinition("definition-1");
 
 		assertIllegalArgument(() ->
-			new PriorityState(
+			com.priorityslots.testing.PriorityStateFixtures.state(
 				List.of(first, duplicate),
 				List.of(),
 				List.of()

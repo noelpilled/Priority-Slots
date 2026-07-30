@@ -1,6 +1,5 @@
 package com.priorityslots.domain;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -27,19 +26,6 @@ public class PriorityState
 
 	@With
 	List<PriorityLibraryEntry> rootEntries;
-
-	public PriorityState(
-		List<PriorityDefinition> definitions,
-		List<PriorityGroup> groups,
-		List<BankTagBinding> bindings)
-	{
-		this(
-			definitions,
-			groups,
-			bindings,
-			deriveRootEntries(definitions, groups)
-		);
-	}
 
 	public PriorityState(
 		List<PriorityDefinition> definitions,
@@ -125,84 +111,6 @@ public class PriorityState
 		}
 
 		return Collections.unmodifiableMap(result);
-	}
-
-	private static List<PriorityLibraryEntry>
-	deriveRootEntries(
-		List<PriorityDefinition> definitions,
-		List<PriorityGroup> groups)
-	{
-		Objects.requireNonNull(
-			definitions,
-			"definitions"
-		);
-		Objects.requireNonNull(groups, "groups");
-
-		Set<String> childGroupIds = new HashSet<>();
-		Set<String> childDefinitionIds = new HashSet<>();
-
-		for (PriorityGroup group : groups)
-		{
-			if (group == null)
-			{
-				continue;
-			}
-
-			for (PriorityLibraryEntry child
-				: group.getChildren())
-			{
-				if (child == null)
-				{
-					continue;
-				}
-
-				if (child.isGroup())
-				{
-					childGroupIds.add(
-						child.getTargetId()
-					);
-				}
-				else
-				{
-					childDefinitionIds.add(
-						child.getTargetId()
-					);
-				}
-			}
-		}
-
-		List<PriorityLibraryEntry> result =
-			new ArrayList<>();
-
-		for (PriorityGroup group : groups)
-		{
-			if (group != null
-				&& !childGroupIds.contains(group.getId()))
-			{
-				result.add(
-					PriorityLibraryEntry.group(
-						group.getId()
-					)
-				);
-			}
-		}
-
-		for (PriorityDefinition definition
-			: definitions)
-		{
-			if (definition != null
-				&& !childDefinitionIds.contains(
-					definition.getId()))
-			{
-				result.add(
-					PriorityLibraryEntry.definition(
-						definition.getId()
-					)
-				);
-			}
-		}
-
-		return List.copyOf(result);
 	}
 
 	private static void validateDefinitions(

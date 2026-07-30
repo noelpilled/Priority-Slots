@@ -245,7 +245,7 @@ public class DuplicateWinnerProjectionRegressionTest
 				List.of(firstSlot, secondSlot)
 		);
 
-		PriorityState state = new PriorityState(
+		PriorityState state = com.priorityslots.testing.PriorityStateFixtures.state(
 				List.of(firstDefinition, secondDefinition),
 				List.of(),
 				List.of(binding)

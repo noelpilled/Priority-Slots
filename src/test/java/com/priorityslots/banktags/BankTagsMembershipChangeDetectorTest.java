@@ -109,7 +109,7 @@ public class BankTagsMembershipChangeDetectorTest
 			List.of(slot)
 		);
 
-		return new PriorityState(
+		return com.priorityslots.testing.PriorityStateFixtures.state(
 			List.of(definition),
 			List.of(),
 			List.of(binding)

@@ -13,30 +13,6 @@ final class PriorityDefinitionPresentation
 	{
 	}
 
-	static String displayName(
-		PriorityDefinition definition,
-		IntFunction<String> itemName)
-	{
-		Objects.requireNonNull(definition, "definition");
-		Objects.requireNonNull(itemName, "itemName");
-
-		String savedName = definition.getName();
-
-		if (!savedName.startsWith("MVP "))
-		{
-			return savedName;
-		}
-
-		int primaryItemId = primaryItemId(definition);
-
-		if (primaryItemId <= 0)
-		{
-			return "Priority definition";
-		}
-
-		return itemName.apply(primaryItemId) + " priority";
-	}
-
 	static List<String> candidateNames(
 		PriorityDefinition definition,
 		IntFunction<String> itemName)
@@ -101,17 +77,4 @@ final class PriorityDefinitionPresentation
 		return List.copyOf(result);
 	}
 
-	private static int primaryItemId(
-		PriorityDefinition definition)
-	{
-		for (PriorityTier tier : definition.getTiers())
-		{
-			if (!tier.getExactItemIds().isEmpty())
-			{
-				return tier.getExactItemIds().get(0);
-			}
-		}
-
-		return -1;
-	}
 }

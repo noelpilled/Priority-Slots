@@ -64,92 +64,6 @@ public class PriorityStateCodecTest
 	}
 
 	@Test
-	public void migratesSchemaVersionOneGroupsAndRootDefinitions()
-	{
-		String json = "{"
-			+ "\"schemaVersion\":1,"
-			+ "\"definitions\":["
-			+ definitionJson("definition-grouped", 1005)
-			+ ","
-			+ definitionJson("definition-root", 1003)
-			+ "],"
-			+ "\"groups\":[{"
-			+ "\"id\":\"group-1\","
-			+ "\"name\":\"Herbs\","
-			+ "\"definitionIds\":[\"definition-grouped\"]"
-			+ "}],"
-			+ "\"bindings\":[]"
-			+ "}";
-
-		PriorityState migrated = codec.decode(json);
-
-		assertEquals(
-			List.of(
-				PriorityLibraryEntry.group("group-1"),
-				PriorityLibraryEntry.definition(
-					"definition-root"
-				)
-			),
-			migrated.getRootEntries()
-		);
-		assertEquals(
-			List.of(
-				PriorityLibraryEntry.definition(
-					"definition-grouped"
-				)
-			),
-			migrated.groupsById()
-				.get("group-1").getChildren()
-		);
-	}
-
-	@Test
-	public void migrationKeepsFirstPlacementOfRepeatedDefinition()
-	{
-		String json = "{"
-			+ "\"schemaVersion\":1,"
-			+ "\"definitions\":["
-			+ definitionJson("definition-1", 1005)
-			+ "],"
-			+ "\"groups\":["
-			+ legacyGroupJson("group-1", "First", "definition-1")
-			+ ","
-			+ legacyGroupJson("group-2", "Second", "definition-1")
-			+ "],"
-			+ "\"bindings\":[]"
-			+ "}";
-
-		PriorityState migrated = codec.decode(json);
-
-		assertEquals(1, migrated.groupsById()
-			.get("group-1").getChildren().size());
-		assertTrue(migrated.groupsById()
-			.get("group-2").getChildren().isEmpty());
-	}
-
-	@Test
-	public void migrationDropsUnknownLegacyGroupReferences()
-	{
-		String json = "{"
-			+ "\"schemaVersion\":1,"
-			+ "\"definitions\":[],"
-			+ "\"groups\":["
-			+ legacyGroupJson(
-				"group-1",
-				"Legacy",
-				"missing-definition"
-			)
-			+ "],"
-			+ "\"bindings\":[]"
-			+ "}";
-
-		PriorityState migrated = codec.decode(json);
-
-		assertTrue(migrated.groupsById()
-			.get("group-1").getChildren().isEmpty());
-	}
-
-	@Test
 	public void roundTripsEmptyState()
 	{
 		PriorityState original = PriorityState.empty();
@@ -158,6 +72,20 @@ public class PriorityStateCodecTest
 			original,
 			codec.decode(codec.encode(original))
 		);
+	}
+
+	@Test
+	public void rejectsUnpublishedSchemaVersionOne()
+	{
+		assertFormatException(() -> codec.decode(
+			"{"
+				+ "\"schemaVersion\":1,"
+				+ "\"definitions\":[],"
+				+ "\"groups\":[],"
+				+ "\"bindings\":[],"
+				+ "\"rootEntries\":[]"
+				+ "}"
+		));
 	}
 
 	@Test
@@ -244,34 +172,6 @@ public class PriorityStateCodecTest
 			"Herbs",
 			List.of(slot)
 		);
-	}
-
-	private static String definitionJson(
-		String id,
-		int itemId)
-	{
-		return "{"
-			+ "\"id\":\"" + id + "\","
-			+ "\"name\":\"" + id + "\","
-			+ "\"tiers\":[{"
-			+ "\"id\":\"" + id + "-tier\","
-			+ "\"exactItemIds\":[" + itemId + "]"
-			+ "}]"
-			+ "}";
-	}
-
-	private static String legacyGroupJson(
-		String id,
-		String name,
-		String definitionId)
-	{
-		return "{"
-			+ "\"id\":\"" + id + "\","
-			+ "\"name\":\"" + name + "\","
-			+ "\"definitionIds\":[\""
-			+ definitionId
-			+ "\"]"
-			+ "}";
 	}
 
 	private static void assertFormatException(

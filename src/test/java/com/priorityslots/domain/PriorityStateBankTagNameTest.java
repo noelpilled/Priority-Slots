@@ -27,7 +27,7 @@ public class PriorityStateBankTagNameTest
 
 		try
 		{
-			new PriorityState(
+			com.priorityslots.testing.PriorityStateFixtures.state(
 					List.of(),
 					List.of(),
 					List.of(
@@ -53,7 +53,7 @@ public class PriorityStateBankTagNameTest
 	public void allowsDifferentStandardizedBankTagNames()
 	{
 		PriorityState state =
-				new PriorityState(
+				com.priorityslots.testing.PriorityStateFixtures.state(
 						List.of(),
 						List.of(),
 						List.of(

@@ -120,15 +120,25 @@ public class PrioritySlotsPlugin extends Plugin
 		lifecycle.activate();
 		bankTagProjector.activate();
 		configureSidebar();
-		reloadPriorityState();
 
 		/*
-		 * Re-enabling the plugin while the bank is already open
-		 * may not produce a new ItemContainerChanged event.
+		 * Load and migrate saved state on the client thread.
+		 * Legacy name migration resolves item compositions, and RuneLite
+		 * requires ItemManager.getItemComposition() to run there.
+		 *
+		 * PrioritySlotsPanel.setState() dispatches its Swing update
+		 * back to the EDT.
 		 */
-		invokeOnClientThreadWhileActive(
-				this::synchronizeFromCurrentBankIfAvailable
-		);
+		invokeOnClientThreadWhileActive(() ->
+		{
+			reloadPriorityState();
+
+			/*
+			 * Re-enabling the plugin while the bank is already open
+			 * may not produce a new ItemContainerChanged event.
+			 */
+			synchronizeFromCurrentBankIfAvailable();
+		});
 
 		log.debug("Priority Slots started");
 	}
@@ -536,6 +546,7 @@ public class PrioritySlotsPlugin extends Plugin
 	private void removeSidebar()
 	{
 		prioritySlotsPanel.setListener(null);
+		prioritySlotsPanel.setStorageError(null);
 		prioritySlotsPanel.setState(PriorityState.empty());
 
 		if (navigationButton != null)
@@ -1143,8 +1154,23 @@ public class PrioritySlotsPlugin extends Plugin
 
 	private void reloadPriorityState()
 	{
-		priorityState = priorityStateStore.load();
+		PriorityStateStore.LoadResult loadResult =
+			priorityStateStore.load();
+
+		priorityState = loadResult.getState();
 		prioritySlotsPanel.setState(priorityState);
+		prioritySlotsPanel.setStorageError(
+			loadResult.getErrorMessage()
+		);
+
+		if (!loadResult.isWritable())
+		{
+			log.warn(
+				"Priority Slots is read-only because its "
+					+ "saved state could not be loaded"
+			);
+			return;
+		}
 
 		log.debug(
 				"Loaded Priority Slots state with "

@@ -52,12 +52,4 @@ public final class ConfigPriorityStateStorage
 		);
 	}
 
-	@Override
-	public void clear()
-	{
-		configManager.unsetConfiguration(
-				CONFIG_GROUP,
-				STATE_KEY
-		);
-	}
 }

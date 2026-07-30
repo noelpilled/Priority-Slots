@@ -13,8 +13,10 @@ import java.util.List;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class PriorityStateStoreTest
 {
@@ -24,13 +26,17 @@ public class PriorityStateStoreTest
 		new PriorityStateCodec(new Gson());
 
 	@Test
-	public void loadsEmptyStateWhenNothingIsSaved()
+	public void loadsWritableEmptyStateWhenNothingIsSaved()
 	{
 		InMemoryStorage storage = new InMemoryStorage();
 		PriorityStateStore store =
 			new PriorityStateStore(storage, codec);
 
-		assertEquals(PriorityState.empty(), store.load());
+		PriorityStateStore.LoadResult result = store.load();
+
+		assertTrue(result.isWritable());
+		assertEquals(PriorityState.empty(), result.getState());
+		assertEquals(null, result.getErrorMessage());
 	}
 
 	@Test
@@ -42,35 +48,69 @@ public class PriorityStateStoreTest
 		PriorityState original = createState();
 
 		store.save(original);
-
 		assertNotNull(storage.serializedState);
-		assertEquals(original, store.load());
+
+		PriorityStateStore.LoadResult result = store.load();
+
+		assertTrue(result.isWritable());
+		assertEquals(original, result.getState());
 	}
 
 	@Test
-	public void malformedStateReturnsEmptyWithoutDeletion()
+	public void malformedStateIsReadOnlyAndCannotBeOverwritten()
 	{
 		InMemoryStorage storage = new InMemoryStorage();
 		storage.serializedState = "{";
 		PriorityStateStore store =
 			new PriorityStateStore(storage, codec);
 
-		assertEquals(PriorityState.empty(), store.load());
+		PriorityStateStore.LoadResult result = store.load();
+
+		assertFalse(result.isWritable());
+		assertEquals(PriorityState.empty(), result.getState());
+		assertNotNull(result.getErrorMessage());
+		assertEquals("{", storage.serializedState);
+
+		try
+		{
+			store.save(createState());
+			fail("Expected writes to be blocked");
+		}
+		catch (IllegalStateException expected)
+		{
+			assertEquals(
+				result.getErrorMessage(),
+				expected.getMessage()
+			);
+		}
+
 		assertEquals("{", storage.serializedState);
 	}
 
 	@Test
-	public void clearRemovesSavedState()
+	public void successfulReloadUnblocksWrites()
 	{
 		InMemoryStorage storage = new InMemoryStorage();
+		storage.serializedState = "{";
 		PriorityStateStore store =
 			new PriorityStateStore(storage, codec);
 
-		store.save(createState());
-		assertNotNull(storage.serializedState);
+		assertFalse(store.load().isWritable());
 
-		store.clear();
-		assertNull(storage.serializedState);
+		PriorityState recovered = createState();
+		storage.serializedState = codec.encode(recovered);
+
+		PriorityStateStore.LoadResult result = store.load();
+
+		assertTrue(result.isWritable());
+		assertEquals(recovered, result.getState());
+
+		store.save(PriorityState.empty());
+
+		assertEquals(
+			PriorityState.empty(),
+			codec.decode(storage.serializedState)
+		);
 	}
 
 	private static PriorityState createState()
@@ -134,12 +174,6 @@ public class PriorityStateStoreTest
 		public void write(String serializedState)
 		{
 			this.serializedState = serializedState;
-		}
-
-		@Override
-		public void clear()
-		{
-			serializedState = null;
 		}
 	}
 }

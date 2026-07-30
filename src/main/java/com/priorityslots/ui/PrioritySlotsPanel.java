@@ -181,6 +181,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 	private String libraryEditParentGroupId;
 	private String libraryEditTargetGroupId;
 	private PriorityState state = PriorityState.empty();
+	private String storageErrorMessage;
 	private String selectedDefinitionId;
 	private final IconTextField itemSearchField =
 		new IconTextField();
@@ -328,6 +329,40 @@ public final class PrioritySlotsPanel extends PluginPanel
 		this.listener = listener == null
 			? NOOP_LISTENER
 			: listener;
+	}
+
+	public void setStorageError(String message)
+	{
+		String normalizedMessage = message == null
+			? null
+			: message.trim();
+
+		if (normalizedMessage != null
+			&& normalizedMessage.isEmpty())
+		{
+			normalizedMessage = null;
+		}
+
+		String requiredMessage = normalizedMessage;
+
+		if (!SwingUtilities.isEventDispatchThread())
+		{
+			SwingUtilities.invokeLater(
+				() -> setStorageError(requiredMessage)
+			);
+			return;
+		}
+
+		storageErrorMessage = requiredMessage;
+
+		if (storageErrorMessage != null)
+		{
+			clearLibraryEditState();
+			selectedDefinitionId = null;
+			resetItemSearch(null);
+		}
+
+		rebuild();
 	}
 
 	public void setState(PriorityState state)
@@ -528,6 +563,14 @@ public final class PrioritySlotsPanel extends PluginPanel
 			"Select a definition to view and edit its priority items."
 		));
 		content.add(Box.createVerticalStrut(8));
+
+		if (storageErrorMessage != null)
+		{
+			JLabel error = hintLabel(storageErrorMessage);
+			error.setForeground(ERROR_COLOR);
+			content.add(error);
+			return;
+		}
 
 		JPanel createActions = new JPanel(
 			new java.awt.GridLayout(1, 2, 4, 0)
@@ -878,7 +921,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 
 		JLabel name = new JLabel(
 			"<html><b>"
-				+ escapeHtml(displayDefinitionName(definition))
+				+ escapeHtml(definition.getName())
 				+ "</b></html>"
 		);
 		name.setForeground(Color.WHITE);
@@ -966,7 +1009,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 		content.add(back);
 		content.add(Box.createVerticalStrut(10));
 
-		content.add(titleLabel(displayDefinitionName(definition)));
+		content.add(titleLabel(definition.getName()));
 		content.add(Box.createVerticalStrut(4));
 		content.add(hintLabel(
 			"Highest priority is at the top. Drag the handle to reorder."
@@ -1796,7 +1839,7 @@ public final class PrioritySlotsPanel extends PluginPanel
 	{
 		int choice = JOptionPane.showConfirmDialog(
 			this,
-			"Delete \"" + displayDefinitionName(definition) + "\"?",
+			"Delete \"" + definition.getName() + "\"?",
 			"Delete priority definition",
 			JOptionPane.OK_CANCEL_OPTION,
 			JOptionPane.WARNING_MESSAGE
@@ -1806,15 +1849,6 @@ public final class PrioritySlotsPanel extends PluginPanel
 		{
 			listener.deleteDefinition(definition.getId());
 		}
-	}
-
-	private String displayDefinitionName(
-		PriorityDefinition definition)
-	{
-		return PriorityDefinitionPresentation.displayName(
-			definition,
-			this::itemName
-		);
 	}
 
 	private String candidatePreviewHtml(

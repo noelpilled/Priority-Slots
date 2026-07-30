@@ -301,7 +301,7 @@ public class BankTagProjectionPlannerTest
 				);
 
 		PriorityState state =
-				new PriorityState(
+				com.priorityslots.testing.PriorityStateFixtures.state(
 						List.of(),
 						List.of(),
 						List.of(binding)
@@ -397,7 +397,7 @@ public class BankTagProjectionPlannerTest
 			"Herbs",
 			List.of(firstSlot, secondSlot)
 		);
-		PriorityState state = new PriorityState(
+		PriorityState state = com.priorityslots.testing.PriorityStateFixtures.state(
 			List.of(first, second),
 			List.of(),
 			List.of(binding)
@@ -465,7 +465,7 @@ public class BankTagProjectionPlannerTest
 				);
 
 		PriorityState state =
-				new PriorityState(
+				com.priorityslots.testing.PriorityStateFixtures.state(
 						List.of(definition),
 						List.of(),
 						List.of(binding)

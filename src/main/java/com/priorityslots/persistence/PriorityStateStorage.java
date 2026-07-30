@@ -5,6 +5,4 @@ interface PriorityStateStorage
 	String read();
 
 	void write(String serializedState);
-
-	void clear();
 }

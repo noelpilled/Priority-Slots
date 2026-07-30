@@ -12,10 +12,8 @@ import com.priorityslots.domain.PriorityLibraryEntry;
 import com.priorityslots.domain.PriorityState;
 import com.priorityslots.domain.PriorityTier;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
@@ -23,7 +21,6 @@ import javax.inject.Singleton;
 public final class PriorityStateCodec
 {
 	static final int CURRENT_SCHEMA_VERSION = 2;
-	private static final int LEGACY_SCHEMA_VERSION = 1;
 
 	private final Gson gson;
 
@@ -182,11 +179,6 @@ public final class PriorityStateCodec
 
 		private PriorityState toDomain()
 		{
-			if (schemaVersion == LEGACY_SCHEMA_VERSION)
-			{
-				return migrateLegacyState();
-			}
-
 			if (schemaVersion != CURRENT_SCHEMA_VERSION)
 			{
 				throw new PriorityStateFormatException(
@@ -206,94 +198,6 @@ public final class PriorityStateCodec
 					),
 					"rootEntries"
 				)
-			);
-		}
-
-		private PriorityState migrateLegacyState()
-		{
-			List<PriorityDefinition> decodedDefinitions =
-				decodeDefinitions();
-
-			Set<String> validDefinitionIds =
-				new HashSet<>();
-
-			for (PriorityDefinition definition
-				: decodedDefinitions)
-			{
-				validDefinitionIds.add(definition.getId());
-			}
-
-			Set<String> placedDefinitionIds =
-				new HashSet<>();
-
-			List<PriorityGroup> decodedGroups =
-				new ArrayList<>();
-
-			List<PriorityLibraryEntry> decodedRootEntries =
-				new ArrayList<>();
-
-			for (GroupDocument groupDocument
-				: requireList(groups, "groups"))
-			{
-				GroupDocument requiredDocument =
-					requireEntry(
-						groupDocument,
-						"groups must not contain null"
-					);
-
-				List<PriorityLibraryEntry> children =
-					new ArrayList<>();
-
-				for (String definitionId
-					: requiredDocument.legacyDefinitionIds())
-				{
-					if (validDefinitionIds.contains(
-						definitionId)
-						&& placedDefinitionIds.add(
-							definitionId))
-					{
-						children.add(
-							PriorityLibraryEntry.definition(
-								definitionId
-							)
-						);
-					}
-				}
-
-				PriorityGroup migratedGroup =
-					new PriorityGroup(
-						requiredDocument.id,
-						requiredDocument.name,
-						children
-					);
-
-				decodedGroups.add(migratedGroup);
-				decodedRootEntries.add(
-					PriorityLibraryEntry.group(
-						migratedGroup.getId()
-					)
-				);
-			}
-
-			for (PriorityDefinition definition
-				: decodedDefinitions)
-			{
-				if (placedDefinitionIds.add(
-					definition.getId()))
-				{
-					decodedRootEntries.add(
-						PriorityLibraryEntry.definition(
-							definition.getId()
-						)
-					);
-				}
-			}
-
-			return new PriorityState(
-				decodedDefinitions,
-				decodedGroups,
-				decodeBindings(),
-				decodedRootEntries
 			);
 		}
 
@@ -451,9 +355,6 @@ public final class PriorityStateCodec
 		@SerializedName("name")
 		private String name;
 
-		@SerializedName("definitionIds")
-		private List<String> definitionIds;
-
 		@SerializedName("children")
 		private List<LibraryEntryDocument> children;
 
@@ -491,35 +392,6 @@ public final class PriorityStateCodec
 			);
 		}
 
-		private List<String> legacyDefinitionIds()
-		{
-			List<String> result = new ArrayList<>();
-			Set<String> seen = new HashSet<>();
-
-			for (String definitionId
-				: requireList(
-					definitionIds,
-					"group definitionIds"
-				))
-			{
-				String normalized =
-					PriorityLibraryEntry.definition(
-						definitionId
-					).getTargetId();
-
-				if (!seen.add(normalized))
-				{
-					throw new IllegalArgumentException(
-						"Duplicate definition ID: "
-							+ normalized
-					);
-				}
-
-				result.add(normalized);
-			}
-
-			return List.copyOf(result);
-		}
 	}
 
 	private static final class LibraryEntryDocument
